@@ -1,0 +1,132 @@
+# PrivacySense Matter Room Hub - sdkconfig.defaults
+#
+# Frozen baseline for first build. See firmware/README.md section 4.
+#
+# IMPORTANT: This file MUST NOT contain any of the following:
+#   - Wi-Fi SSID / passphrase
+#   - Matter setup payload / passcode / discriminator
+#   - Device MAC address
+#   - Vendor-specific private keys / certificates
+# Wi-Fi credentials and Matter commissioning data are injected at runtime
+# via BLE commissioning; nothing sensitive is baked into the image.
+#
+# Flash size: 16 MB, verified on the actual board via `esptool.py flash_id`
+# on 2026-07-17 (ESP32-C6 QFN40 rev v0.2, Manufacturer 0x68, Device 0x4018).
+# Evidence: tests/evidence/dev-env-config-2026-07-17.md.
+# If the board is ever swapped, re-run flash_id and re-freeze before flashing.
+
+# --- Partition table (OTA A/B, see docs/ota-safety.md section 5.1) ---
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+CONFIG_PARTITION_TABLE_FILENAME="partitions.csv"
+CONFIG_PARTITION_TABLE_OFFSET=0x8000
+
+# --- Flash size (16 MB, pending esptool.py flash-id verification) ---
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+CONFIG_ESPTOOLPY_FLASHMODE="dio"
+CONFIG_ESPTOOLPY_FLASHFREQ_40M=y
+CONFIG_ESPTOOLPY_FLASHFREQ="40m"
+
+# --- OTA support (A/B slots, anti-rollback handled in app code) ---
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
+# --- Wi-Fi: Station mode only, credentials injected at runtime ---
+# Wi-Fi mode is set at runtime via esp_wifi_set_mode(WIFI_MODE_STA). ESP-IDF
+# v5.4 has no CONFIG_ESP_WIFI_STA / CONFIG_ESP_WIFI_MODE_STA Kconfig — both
+# are legacy symbols silently ignored if set, so they are omitted here.
+# Wi-Fi SSID / password intentionally NOT set here.
+
+# --- BLE: NimBLE only, used for Matter commissioning ---
+CONFIG_BT_ENABLED=y
+CONFIG_BT_BLE_ENABLED=y
+CONFIG_BT_NIMBLE_ENABLED=y
+CONFIG_BT_NIMBLE_ROLE_PERIPHERAL=y
+CONFIG_BT_NIMBLE_ROLE_BROADCASTER=y
+CONFIG_BT_NIMBLE_ROLE_CENTRAL=n
+CONFIG_BT_NIMBLE_NVS_PERSIST=y
+# BT controller is released from app code after commissioning completes.
+
+# --- FreeRTOS: 100 Hz tick, trace facility for stack diagnostics ---
+CONFIG_FREERTOS_HZ=100
+CONFIG_FREERTOS_USE_TRACE_FACILITY=y
+CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y
+CONFIG_FREERTOS_WATCHPOINT_END_OF_STACK=y
+
+# --- Task Watchdog Timer (TWDT) ---
+# Timeout 10 s per docs/task-architecture.md §7.1.
+# DHT22 5 s sample period + scheduling jitter must stay safely below TWDT.
+# ESP-IDF v5.4 Kconfig names: CONFIG_ESP_TASK_WDT_EN / _INIT / _PANIC.
+CONFIG_ESP_TASK_WDT_EN=y
+CONFIG_ESP_TASK_WDT_INIT=y
+CONFIG_ESP_TASK_WDT_PANIC=y
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=10
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0=y
+
+# --- NVS ---
+CONFIG_NVS_ENCRYPTION=n
+CONFIG_NVS_ASSERT_ERROR_CHECK=y
+
+# --- Core dump to flash (partition `coredump`) ---
+CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
+CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
+CONFIG_ESP_COREDUMP_CHECKSUM_CRC32=y
+
+# --- Logging ---
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+CONFIG_LOG_DEFAULT_LEVEL=3
+CONFIG_LOG_COLORS=y
+CONFIG_LOG_TIMESTAMP_SOURCE_RTOS=y
+
+# --- Hardware: ESP32-C6 ---
+CONFIG_IDF_TARGET="esp32c6"
+
+# --- Wi-Fi power save (balanced; revisit after current profiling) ---
+# Power-save mode is selected at runtime via esp_wifi_set_ps(WIFI_PS_MIN_MODEM)
+# after esp_wifi_start(). ESP-IDF v5.4 has no CONFIG_ESP_WIFI_PS_MIN_MODEM
+# Kconfig (silently ignored if set); the default with no esp_wifi_set_ps()
+# call is also WIFI_PS_MIN_MODEM, so the explicit call is mostly documentary.
+
+# --- CCache (build speed only; not committed) ---
+# IDF_CCACHE_ENABLE=1 is exported in the shell, not set here.
+
+# --- MQTT / OTA HTTP (HTTPS only, cert bundle) ---
+# HTTPS is always available when esp_http_client/esp_tls is pulled in; ESP-IDF
+# v5.4 has no CONFIG_ESP_HTTPS_ENABLE_HTTPS Kconfig (silently ignored if set).
+CONFIG_ESP_TLS_USE_DS_PERIPHERAL=n
+
+# --- Matter (esp_matter) ---
+# Most Matter config comes from the esp_matter component defaults.
+# Only override what the project needs to lock down.
+
+# Disable hardcoded setup payload / passcode in sdkconfig.
+# passcode / discriminator / SPAKE2+ verifier come from a Commissionable Data
+# Provider at runtime (commissioning-lifecycle.md §3.2):
+#   - Test Provider  (fixed values, dev only) for first-build bring-up
+#   - Factory Provider (pre-provisioned in factory NVS/Flash) for production
+# The QR / manual-code setup payload is derived from these values and presented
+# OUT-OF-BAND for the user to scan / type into the controller (e.g. printed on
+# a label). BLE then carries the PASE commissioning session that uses the
+# passcode — the QR/manual code itself is never sent over BLE. It is NOT
+# "randomly generated on first boot" and NOT baked into the firmware image.
+# CONFIG_ESP_MATTER_PASSCODE / DISCRIMINATOR intentionally NOT set here.
+
+# --- PSRAM (ESP32-C6-WROOM-1 has no PSRAM; keep disabled) ---
+CONFIG_SPIRAM=n
+
+# --- Stack overflow protection ---
+# ESP-IDF v5.4 uses CONFIG_COMPILER_STACK_CHECK_MODE_STRONG, which implicitly
+# enables -fstack-protector-strong. CONFIG_COMPILER_STACK_CHECK is a legacy
+# symbol that no longer exists in v5.4 (silently ignored if set), so it is
+# omitted here.
+CONFIG_COMPILER_STACK_CHECK_MODE_STRONG=y
+
+# --- Compiler warnings: do NOT promote to errors yet ---
+# Upstream esp-matter / connectedhomeip currently emits warnings under -Wextra;
+# enabling -Werror would block the first build. Track warnings in firmware/README.md
+# "First build status" section and enable -Werror only after the upstream is clean.
+CONFIG_COMPILER_WARN_WRITE_STRINGS=y
+
+# --- Disable printf/puts floating point to save flash (revisit if needed) ---
+# CONFIG_NEWLIB_NANO_FORMAT=y

@@ -1,0 +1,56 @@
+# ESP-IDF generated files
+# NOTE: sdkconfig (not sdkconfig.defaults) is ignored because it may contain
+# Wi-Fi passphrase, Matter passcode/discriminator or device MAC after
+# menuconfig. Only sdkconfig.defaults is committed; it must never hold secrets.
+build/
+**/build/
+sdkconfig
+sdkconfig.old
+sdkconfig.*
+!sdkconfig.defaults
+**/managed_components/
+
+# IDE and local files
+.vscode/
+.idea/
+*.user
+*.swp
+
+# Python and test artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.log
+
+# Allow sanitized test evidence (Markdown summaries only)
+# Anything that is not Markdown under tests/evidence/ is ignored by the
+# negation rule below; this prevents binary logs / coredumps / pcaps that may
+# contain MAC, setup payload or passphrase from leaking into the repository.
+tests/evidence/*
+!tests/evidence/
+!tests/evidence/.gitkeep
+!tests/evidence/**/*.md
+
+# Local secrets
+.env
+.env.*
+*.pem
+*.key
+secrets/
+
+# Matter / device-identity runtime artifacts
+# These are produced at runtime or during commissioning and MUST NEVER be
+# committed: they contain setup passcode, discriminator, QR payload or MAC.
+*.matter_passcode
+*.matter_discriminator
+*.matter_setup_payload
+*setup_payload*
+*manualcode*
+*mac_address*
+*device_mac*
+coredump-*.bin
+coredump-*.elf
+
+# Hardware generated files
+*.bak
+gerber-output/

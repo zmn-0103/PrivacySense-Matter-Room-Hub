@@ -1,0 +1,38 @@
+# PrivacySense Matter Room Hub - Partition Table
+#
+# Layout: 16 MB Flash (N16, MUST be verified via `esptool.py flash-id`).
+# See docs/ota-safety.md section 5.1 for the frozen draft.
+#
+# Constraints:
+#   - Two equal OTA slots sizes (5 MB each); max image must fit in one slot.
+#   - coredump stored on flash for post-mortem analysis.
+#   - Business config (ps_cfg) in a SEPARATE NVS partition so that corruption
+#     of the default `nvs` partition (Wi-Fi/Matter/BLE credentials) can be
+#     erased and recovered WITHOUT losing business config. See
+#     commissioning-lifecycle.md §3.3 and main.c init_nvs().
+#   - Remaining space (~5.75 MB) reserved for future local storage.
+#
+# Offsets:
+#   0x00008000  partition table (4 KB, default)
+#   0x00009000  nvs          (32 KB) — Wi-Fi/Matter/BLE credentials
+#   0x00011000  otadata      (8 KB)
+#   0x00013000  phy_init     (4 KB)
+#   0x00020000  ota_0        (5 MB, 64 KB aligned)
+#   0x00520000  ota_1        (5 MB)
+#   0x00A20000  coredump     (64 KB)
+#   0x00A30000  ps_cfg       (16 KB) — business config (state-model.md §8)
+#   0x00A34000  ... unused (~5.75 MB) ...
+#   0x01000000  END (16 MB)
+#
+# Format: Name, Type, SubType, Offset, Size, Flags
+# Type:   app=0x00 / data=0x01
+# SubType: ota_0=0x10 / ota_1=0x11 / nvs=0x02 / phy=0x01 / ota=0x00 / coredump=0x03
+
+# Name,     Type, SubType, Offset,   Size,    Flags
+nvs,        data, nvs,     0x9000,   0x8000,
+otadata,    data, ota,     0x11000,  0x2000,
+phy_init,   data, phy,     0x13000,  0x1000,
+ota_0,      app,  ota_0,   0x20000,  0x500000,
+ota_1,      app,  ota_1,   0x520000, 0x500000,
+coredump,   data, coredump,0xA20000, 0x10000,
+ps_cfg,     data, nvs,     0xA30000, 0x4000,
