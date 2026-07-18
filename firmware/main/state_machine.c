@@ -135,7 +135,7 @@ void state_machine_task(void *pvParameters)
 
     uint32_t loop_count = 0;
     ESP_LOGI(TAG, "task started (stack %u bytes, prio %d)",
-             (unsigned)uxTaskGetStackHighWaterMark(NULL), uxTaskPriorityGet(NULL));
+             (unsigned)uxTaskGetStackHighWaterMark(NULL), (int)uxTaskPriorityGet(NULL));
 
     for (;;) {
         app_event_t ev;

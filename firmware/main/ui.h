@@ -12,6 +12,9 @@
 
 #pragma once
 
+#include <stdbool.h>
+#include <stdint.h>
+
 #include "esp_err.h"
 
 #ifdef __cplusplus
@@ -19,7 +22,24 @@ extern "C" {
 #endif
 
 // --- Lifecycle ---
+// Initialise the RGB LED. On failure the function releases all resources
+// (LED strip + internal queue) and returns a non-OK esp_err_t; the caller
+// MUST treat UI as unavailable and MUST NOT spawn ui_task.
+//
+// Design contract (state-model.md §6, AGENTS.md §3 "本地可用性"):
+//   - UI is a NON-critical peripheral. A broken on-board WS2812 or RMT
+//     channel MUST NOT prevent sensors / state machine / network / Matter
+//     from running. The caller is expected to skip ui_task spawn on failure
+//     and continue boot.
+//   - After a failed ui_init, ui_set_long_press_countdown() and ui_task()
+//     are safe to call (no-op + log). This keeps button.c / main.c simple:
+//     they do not need conditional guards around every UI call.
 esp_err_t ui_init(void);
+
+// Returns true iff ui_init() succeeded and the strip handle is live.
+// button_task can use this to decide whether long-press countdown writes
+// are useful (they are silently dropped if UI is degraded).
+bool ui_is_initialized(void);
 
 // ui_task entry point. Created by app_main with stack 3072, prio 3.
 void ui_task(void *pvParameters);

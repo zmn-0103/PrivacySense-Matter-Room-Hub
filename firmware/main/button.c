@@ -198,7 +198,7 @@ void button_task(void *pvParameters)
     uint8_t  last_countdown_shown = 0;
 
     ESP_LOGI(TAG, "task started (stack %u bytes, prio %d)",
-             (unsigned)uxTaskGetStackHighWaterMark(NULL), uxTaskPriorityGet(NULL));
+             (unsigned)uxTaskGetStackHighWaterMark(NULL), (int)uxTaskPriorityGet(NULL));
 
     for (;;) {
         // Use a shorter block when the button is held down so we can poll the

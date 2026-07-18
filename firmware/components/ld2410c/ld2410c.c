@@ -59,7 +59,7 @@ static void sensor_radar_task(void *pv)
 
     ESP_LOGI(TAG, "task started (uart=%d, stack %u bytes, prio %d)",
              s_uart_num, (unsigned)uxTaskGetStackHighWaterMark(NULL),
-             uxTaskPriorityGet(NULL));
+             (int)uxTaskPriorityGet(NULL));
 
     for (;;) {
         int n = uart_read_bytes(s_uart_num, buf, sizeof(buf),

@@ -127,7 +127,23 @@ void app_main(void)
 
     // Peripherals + drivers.
     ESP_ERROR_CHECK(button_init());
-    ESP_ERROR_CHECK(ui_init());
+
+    // UI is a NON-critical peripheral (state-model.md §6, AGENTS.md §3
+    // "本地可用性"). A broken on-board WS2812 or RMT channel MUST NOT prevent
+    // sensors / state machine / network / Matter from running. ui_init() now
+    // releases all resources on failure and returns a non-OK esp_err_t; we
+    // log loudly but continue boot. ui_task is spawned conditionally below;
+    // all UI public APIs (ui_set_long_press_countdown etc.) are safe no-ops
+    // when UI is degraded, so button.c does not need to change.
+    {
+        esp_err_t uret = ui_init();
+        if (uret != ESP_OK) {
+            ESP_LOGW(TAG, "ui_init failed: %s — continuing WITHOUT UI "
+                     "(LED off; long-press countdown will not render)",
+                     esp_err_to_name(uret));
+        }
+    }
+
     ESP_ERROR_CHECK(network_init());
 
     // Sensor components expose a callback-based start API; they emit
@@ -177,8 +193,15 @@ void app_main(void)
                TASK_STATE_MACHINE_STACK, TASK_STATE_MACHINE_PRIO);
     SPAWN_TASK("button",        button_task,
                TASK_BUTTON_STACK, TASK_BUTTON_PRIO);
-    SPAWN_TASK("ui",            ui_task,
-               TASK_UI_STACK, TASK_UI_PRIO);
+    // Spawn ui_task ONLY if ui_init() succeeded. When UI is degraded, button
+    // long-press countdown writes are silently dropped by ui_set_long_press_
+    // countdown() and the rest of the system continues normally.
+    if (ui_is_initialized()) {
+        SPAWN_TASK("ui",        ui_task,
+                   TASK_UI_STACK, TASK_UI_PRIO);
+    } else {
+        ESP_LOGW(TAG, "skipping ui_task spawn (UI degraded)");
+    }
     SPAWN_TASK("network",       network_task,
                TASK_NETWORK_STACK, TASK_NETWORK_PRIO);
     SPAWN_TASK("matter_adapt",  matter_adapter_task,

@@ -23,14 +23,24 @@ if(NOT DEFINED ENV{ESP_MATTER_PATH})
         "Run `source /root/esp/esp-matter/export.sh` before invoking idf.py.")
 endif()
 
-# Device HAL path is target-specific; ESP32-C6 uses the C6 devkit.
-if(NOT DEFINED ENV{ESP_MATTER_DEVICE_PATH})
-    if("${IDF_TARGET}" STREQUAL "esp32c6")
-        set(ENV{ESP_MATTER_DEVICE_PATH} $ENV{ESP_MATTER_PATH}/device_hal/device/esp32c6_devkit_c)
-    else()
-        message(FATAL_ERROR "Unsupported IDF_TARGET: ${IDF_TARGET}. v1 locks the board to esp32c6.")
-    endif()
+# v1 locks the board to ESP32-C6. If a previous configure run failed mid-way
+# (e.g. missing dependencies), IDF_TARGET can be empty when `idf.py build` is
+# re-invoked without `set-target` — ESP-IDF's target-aware logic would then
+# run before the target is set. Default to esp32c6 here and reject anything
+# else, so the build directory is always in a consistent target state.
+if(NOT DEFINED IDF_TARGET OR "${IDF_TARGET}" STREQUAL "")
+    set(IDF_TARGET "esp32c6")
 endif()
+
+if(NOT "${IDF_TARGET}" STREQUAL "esp32c6")
+    message(FATAL_ERROR
+        "Unsupported IDF_TARGET: ${IDF_TARGET}. v1 locks the board to esp32c6.")
+endif()
+
+# Device HAL path: target-specific (ESP32-C6 → C6 devkit). Set unconditionally
+# now that IDF_TARGET is guaranteed to be esp32c6.
+set(ENV{ESP_MATTER_DEVICE_PATH}
+    "$ENV{ESP_MATTER_PATH}/device_hal/device/esp32c6_devkit_c")
 
 set(PROJECT_VER "1.0")
 set(PROJECT_VER_NUMBER 1)
@@ -43,17 +53,40 @@ include(${ESP_MATTER_PATH}/examples/common/cmake_common/components_include.cmake
 include($ENV{ESP_MATTER_DEVICE_PATH}/esp_matter_device.cmake)
 
 # EXTRA_COMPONENT_DIRS: esp-matter official dirs first, then project-local.
-# ${extra_components_dirs_append} is populated by esp_matter_device.cmake above
-# and contains target-specific device HAL subdirs (e.g. led_strip, button) for
-# the selected devkit. It MUST be listed before the project-local components so
-# the device HAL is resolvable. Project-local components (ld2410c, env_sensor)
-# are kept last so they cannot accidentally shadow esp-matter component names.
+#
+# NOTE on what is INTENTIONALLY NOT listed here:
+#   - ${ESP_MATTER_PATH}/examples/common
+#       Contains app_reset, which REQUIRES button (from button_driver) →
+#       pulls in the device HAL's led_driver → espressif/led_strip ^1.0.0
+#       (legacy driver/rmt.h). The project does not use app_reset; including
+#       the whole examples/common directory drags in this transitive
+#       dependency and breaks the build. The include() of
+#       examples/common/cmake_common/components_include.cmake above is still
+#       kept — that file only adds Matter SDK component dirs, not app_reset.
+#   - ${ESP_MATTER_PATH}/device_hal/device
+#       Same root cause: device_hal/device contains app_reset and the
+#       button/led drivers with the same legacy led_strip constraint.
+#   - ${extra_components_dirs_append}
+#       Populated by esp_matter_device.cmake above with the device HAL's
+#       led_driver / button_driver subdirs; same legacy led_strip constraint.
+#
+# Rationale in one line: led_strip 1.x (legacy driver/rmt.h) conflicts with
+# env_sensor's driver/rmt_rx.h (new RMT driver) and triggers the early
+# abort(): "CONFLICT! driver_ng is not allowed to be used with the legacy
+# driver". The project pins espressif/led_strip ^2.0.0 via
+# main/idf_component.yml and manages LED/button itself (firmware/main/ui.c,
+# firmware/main/button.c), so the device HAL's LED/button abstractions are
+# not needed.
+#
+# The esp_matter_device.cmake include above is kept because it may set
+# other device-HAL variables consumed by esp_matter core; only the
+# device_hal/device component directory is excluded from EXTRA_COMPONENT_DIRS.
+#
+# Project-local components (ld2410c, env_sensor) are kept last so they cannot
+# accidentally shadow esp-matter component names.
 set(EXTRA_COMPONENT_DIRS
-    "${ESP_MATTER_PATH}/examples/common"
     "${MATTER_SDK_PATH}/config/esp32/components"
     "${ESP_MATTER_PATH}/components"
-    "${ESP_MATTER_PATH}/device_hal/device"
-    ${extra_components_dirs_append}
     "${CMAKE_CURRENT_LIST_DIR}/components")
 
 project(privacy-sense-matter-room-hub)

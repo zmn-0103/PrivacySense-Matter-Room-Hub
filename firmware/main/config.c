@@ -330,7 +330,7 @@ void config_task(void *pvParameters)
     config_event_t ev;
 
     ESP_LOGI(TAG, "task started (stack %u bytes, prio %d)",
-             (unsigned)uxTaskGetStackHighWaterMark(NULL), uxTaskPriorityGet(NULL));
+             (unsigned)uxTaskGetStackHighWaterMark(NULL), (int)uxTaskPriorityGet(NULL));
 
     for (;;) {
         if (xQueueReceive(g_config_event_queue, &ev,

@@ -40,8 +40,16 @@
 #include "freertos/queue.h"
 #include "freertos/task.h"
 
-#include "esp_matter.h"
-#include "esp_matter_endpoint.h"
+// NOTE: <esp_matter.h> and <esp_matter_endpoint.h> are intentionally NOT
+// included here. This file is compiled as C (matter_app.c, -std=gnu17), but
+// those headers are C++-only (they reference CHIP system config macros and
+// C++ stdlib headers like <limits>). The current stub implementation does not
+// call any esp_matter API, so the includes are unnecessary.
+//
+// When real Matter integration is implemented, rename this file to
+// matter_app.cpp and update firmware/main/CMakeLists.txt:16 accordingly. The
+// existing extern "C" wrapper in matter_app.h:42 will keep the C ABI stable
+// for callers in main.c / state_machine.c.
 
 #include "state_machine.h"   // g_matter_report_queue, matter_report_t, app_event_t
 
@@ -124,7 +132,7 @@ void matter_adapter_task(void *pvParameters)
     ESP_ERROR_CHECK(esp_task_wdt_add(NULL));
 
     ESP_LOGI(TAG, "task started (stack %u bytes, prio %d)",
-             (unsigned)uxTaskGetStackHighWaterMark(NULL), uxTaskPriorityGet(NULL));
+             (unsigned)uxTaskGetStackHighWaterMark(NULL), (int)uxTaskPriorityGet(NULL));
 
     for (;;) {
         matter_report_t report;

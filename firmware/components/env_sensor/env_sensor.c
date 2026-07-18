@@ -17,6 +17,7 @@
 
 #include "env_sensor.h"
 
+#include <inttypes.h>
 #include <string.h>
 
 #include "esp_log.h"
@@ -52,6 +53,22 @@ static TaskHandle_t                s_task_handle  = NULL;
 static rmt_channel_handle_t        s_rmt_rx_chan  = NULL;
 static SemaphoreHandle_t          s_rx_done_sem   = NULL;
 
+// Transaction ID to defeat late callbacks. Each rmt_receive() call bumps
+// s_expected_txn before arming; the ISR captures the ID it saw at callback
+// time into s_last_txn. The task only accepts a callback result if
+// s_last_txn == s_expected_txn. A late callback from a previous (timed-out)
+// transaction will have a stale ID and is discarded.
+//
+// Both variables are only touched from two contexts:
+//   - sensor_env_task (writes s_expected_txn, reads s_last_txn after sem take)
+//   - on_rmt_rx_done ISR (writes s_last_txn, gives sem)
+// The semaphore provides the necessary happens-before ordering for the
+// s_last_txn read in the task. s_expected_txn is only read by the ISR via a
+// stale snapshot — worst case is one extra discarded callback, which is
+// harmless.
+static volatile uint8_t s_expected_txn = 0;
+static volatile uint8_t s_last_txn     = 0;
+
 // DHT22 valid range (state-model.md §5.2). Out-of-range samples are discarded.
 // Units: centi-celsius (1/100 °C) and per-mille (1/1000 %RH).
 #define DHT22_TEMP_MIN_CC   (-4000)    // -40.00 °C
@@ -67,6 +84,10 @@ static rmt_symbol_word_t s_rx_buf[ENV_RMT_MEM_SYMBOLS];
 // after the receive completes, read by the task after semaphore take.
 // Safe because the ISR give happens-after the write, and the task take
 // happens-before the read (full memory barrier via the semaphore).
+//
+// NOTE: this is only meaningful when s_last_txn == s_expected_txn at the
+// read site. A late callback from a previous transaction may have written a
+// stale symbol count that must NOT be consumed by the current iteration.
 static volatile size_t s_last_num_symbols = 0;
 
 // RMT receive config: pulse widths outside [min, max] are treated as gaps.
@@ -86,10 +107,16 @@ static bool IRAM_ATTR on_rmt_rx_done(rmt_channel_handle_t chan,
 {
     (void)chan;
     (void)user_ctx;
-    // ISR context: capture symbol count and signal the task. NO parsing here.
+    // ISR context: capture symbol count AND the transaction ID that was
+    // current when the receive was armed. NO parsing here.
     // edata->received_symbols points into the buffer passed to rmt_receive();
     // the task copies what it needs before issuing the next rmt_receive() call.
+    //
+    // s_expected_txn may have been bumped by the task if a new transaction
+    // was already started (late callback case) — by reading it here into a
+    // local, we lock in the value that the task will compare against.
     s_last_num_symbols = edata->num_symbols;
+    s_last_txn         = s_expected_txn;
     BaseType_t high_task_woken = pdFALSE;
     xSemaphoreGiveFromISR(s_rx_done_sem, &high_task_woken);
     return (high_task_woken == pdTRUE);
@@ -137,7 +164,7 @@ static void sensor_env_task(void *pv)
 
     ESP_LOGI(TAG, "task started (gpio=%d, stack %u bytes, prio %d)",
              s_data_gpio, (unsigned)uxTaskGetStackHighWaterMark(NULL),
-             uxTaskPriorityGet(NULL));
+             (int)uxTaskPriorityGet(NULL));
 
     for (;;) {
         uint32_t timestamp_ms = xTaskGetTickCount() * portTICK_PERIOD_MS;
@@ -145,7 +172,25 @@ static void sensor_env_task(void *pv)
         // 1) Drive the host start signal on GPIO2. Bus is held LOW on return.
         drive_start_signal(s_data_gpio);
 
-        // 2) Arm RMT RX BEFORE releasing the bus. The 18 ms low is filtered
+        // 2) Drain any stale semaphore tokens from a previous (timed-out)
+        //    transaction before arming a new one. xSemaphoreTake with 0 tick
+        //    wait drains one token per call; loop until none remain. This
+        //    guarantees the next RX-done signal we get corresponds to the
+        //    rmt_receive() call we are about to issue, not a late callback
+        //    from a previous iteration.
+        while (xSemaphoreTake(s_rx_done_sem, 0) == pdTRUE) {
+            /* discard stale token */
+        }
+
+        // 3) Bump the transaction ID BEFORE arming RX. The ISR captures the
+        //    ID at callback time into s_last_txn; after the sem take we
+        //    compare s_last_txn == s_expected_txn to detect late callbacks.
+        //    Using uint8_t gives 256 transactions before wrap — far more
+        //    headroom than the 1 outstanding transaction we ever have.
+        s_expected_txn++;
+        uint8_t this_txn = s_expected_txn;
+
+        // 4) Arm RMT RX BEFORE releasing the bus. The 18 ms low is filtered
         //    as a gap by signal_range_max_ns; the RMT engine is ready to
         //    capture the sensor's response edge the instant we release.
         //    ESP-IDF v5.4 new RMT RX API: rmt_receive() is one-shot, no
@@ -161,14 +206,32 @@ static void sensor_env_task(void *pv)
             goto feed_wdt;
         }
 
-        // 3) Release the bus (OD output high = high-Z). External ~5.1 kΩ
+        // 5) Release the bus (OD output high = high-Z). External ~5.1 kΩ
         //    pull-up brings the line high; sensor responds in ~30 µs.
         gpio_set_level(s_data_gpio, 1);
 
-        // 4) Wait for RX done (≤ 100 ms).
+        // 6) Wait for RX done (≤ 100 ms). On timeout, explicitly disable the
+        //    RX channel to terminate any in-progress receive — without this,
+        //    a late callback could fire on the NEXT iteration's rmt_receive
+        //    and corrupt s_last_num_symbols / give a stale semaphore token.
+        //    rmt_disable() is idempotent; the channel is re-enabled by the
+        //    next rmt_receive() call (ESP-IDF v5.4 new RMT RX API: receive
+        //    internally enables the channel if it was disabled).
         if (xSemaphoreTake(s_rx_done_sem,
                            pdMS_TO_TICKS(ENV_RMT_TIMEOUT_MS)) == pdTRUE) {
-            size_t num = s_last_num_symbols;
+            // Got a semaphore token. Validate that it belongs to THIS
+            // transaction (s_last_txn == this_txn). A late callback from a
+            // previous timed-out transaction would have a stale ID.
+            uint8_t  seen_txn = s_last_txn;
+            size_t   num      = s_last_num_symbols;
+            if (seen_txn != this_txn) {
+                ESP_LOGW(TAG, "DHT22 late callback discarded "
+                         "(seen_txn=%u, expected=%u)",
+                         (unsigned)seen_txn, (unsigned)this_txn);
+                emit_placeholder(timestamp_ms);
+                consecutive_failures++;
+                goto feed_wdt;
+            }
             // TODO: real DHT22 parser:
             //   1. If num < 41, mark as parse failure (insufficient symbols).
             //   2. Walk s_rx_buf[0..num-1]:
@@ -191,7 +254,11 @@ static void sensor_env_task(void *pv)
             consecutive_failures++;
         } else {
             // RMT did not complete within 100 ms → sensor not responding.
-            ESP_LOGW(TAG, "DHT22 no response within %u ms", ENV_RMT_TIMEOUT_MS);
+            // Disable the channel to terminate the in-progress receive and
+            // prevent a late ISR from corrupting the next transaction.
+            ESP_LOGW(TAG, "DHT22 no response within %u ms; disabling RX",
+                     ENV_RMT_TIMEOUT_MS);
+            rmt_disable(s_rmt_rx_chan);
             emit_placeholder(timestamp_ms);
             consecutive_failures++;
         }
@@ -202,7 +269,7 @@ feed_wdt:
             // state-model.md §5.2: 3 consecutive failures → sensor offline.
             // The state machine infers this from valid=false samples; no
             // separate "offline" event is sent.
-            ESP_LOGW(TAG, "DHT22 consecutive failures=%u (≥ %u → offline)",
+            ESP_LOGW(TAG, "DHT22 consecutive failures=%" PRIu32 " (≥ %u → offline)",
                      consecutive_failures, ENV_FAIL_THRESHOLD);
         }
 

@@ -94,11 +94,55 @@ CONFIG_IDF_TARGET="esp32c6"
 # --- MQTT / OTA HTTP (HTTPS only, cert bundle) ---
 # HTTPS is always available when esp_http_client/esp_tls is pulled in; ESP-IDF
 # v5.4 has no CONFIG_ESP_HTTPS_ENABLE_HTTPS Kconfig (silently ignored if set).
+# Disable DS (Digital Signature) peripheral at both layers:
+#   - CONFIG_ESP_TLS_USE_DS_PERIPHERAL         (ESP-TLS layer, in esp-idf)
+#   - CONFIG_ESP_SECURE_CERT_DS_PERIPHERAL     (esp_secure_cert_mgr component)
+# These are TWO INDEPENDENT Kconfig symbols. esp_secure_cert_mgr is pulled in
+# as a transitive dependency of esp_matter regardless of DAC provider choice;
+# its default CONFIG_ESP_SECURE_CERT_DS_PERIPHERAL=y must be explicitly
+# disabled, otherwise esp_secure_cert_tlv_read.c references esp_ds_data_ctx_t
+# (a type only defined when CONFIG_ESP_TLS_USE_DS_PERIPHERAL=y) and fails to
+# compile with "#error DS configuration flags not activated".
 CONFIG_ESP_TLS_USE_DS_PERIPHERAL=n
+CONFIG_ESP_SECURE_CERT_DS_PERIPHERAL=n
 
 # --- Matter (esp_matter) ---
 # Most Matter config comes from the esp_matter component defaults.
 # Only override what the project needs to lock down.
+
+# DAC / Commissionable Data / Device Info Providers:
+# Use Test providers for first build (no factory partition provisioning yet).
+# SEC_CERT_DAC_PROVIDER is defined with a prompt outside the choice in
+# connectedhomeip Kconfig, which causes it to default to y and pull in
+# esp_secure_cert_mgr + DS peripheral requirements. Explicitly disable it.
+CONFIG_EXAMPLE_DAC_PROVIDER=y
+CONFIG_SEC_CERT_DAC_PROVIDER=n
+CONFIG_EXAMPLE_COMMISSIONABLE_DATA_PROVIDER=y
+CONFIG_EXAMPLE_DEVICE_INSTANCE_INFO_PROVIDER=y
+CONFIG_ENABLE_ESP32_FACTORY_DATA_PROVIDER=n
+
+# Matter over Wi-Fi (not Thread). ESP32-C6 shares radio between Wi-Fi and
+# 802.15.4; AGENTS.md §3 mandates Wi-Fi only for v1. Disable OpenThread
+# initialisation to avoid radio conflict and reduce flash/RAM footprint.
+CONFIG_ESP_MATTER_ENABLE_OPENTHREAD=n
+
+# Matter crypto requirement: HKDF for key derivation (SPAKE2+, etc.)
+CONFIG_MBEDTLS_HKDF_C=y
+
+# Matter requires IPv6 autoconfig and routing hooks for fabric addresses
+CONFIG_LWIP_IPV6_AUTOCONFIG=y
+CONFIG_LWIP_HOOK_IP6_ROUTE_DEFAULT=y
+CONFIG_LWIP_HOOK_ND6_GET_GW_DEFAULT=y
+CONFIG_LWIP_IPV6_NUM_ADDRESSES=6
+
+# Disable Wi-Fi AP mode (STA-only per AGENTS.md §3).
+# ESP-IDF v5.4 does not have CONFIG_ENABLE_WIFI_AP — that symbol is silently
+# ignored. The effective Kconfig is CONFIG_ESP_WIFI_SOFTAP_SUPPORT; setting it
+# to n removes SoftAP code from the Wi-Fi library and reduces flash/RAM.
+CONFIG_ESP_WIFI_SOFTAP_SUPPORT=n
+
+# Enable OTA Requestor (partition table has A/B OTA slots)
+CONFIG_ENABLE_OTA_REQUESTOR=y
 
 # Disable hardcoded setup payload / passcode in sdkconfig.
 # passcode / discriminator / SPAKE2+ verifier come from a Commissionable Data
@@ -111,9 +155,6 @@ CONFIG_ESP_TLS_USE_DS_PERIPHERAL=n
 # passcode — the QR/manual code itself is never sent over BLE. It is NOT
 # "randomly generated on first boot" and NOT baked into the firmware image.
 # CONFIG_ESP_MATTER_PASSCODE / DISCRIMINATOR intentionally NOT set here.
-
-# --- PSRAM (ESP32-C6-WROOM-1 has no PSRAM; keep disabled) ---
-CONFIG_SPIRAM=n
 
 # --- Stack overflow protection ---
 # ESP-IDF v5.4 uses CONFIG_COMPILER_STACK_CHECK_MODE_STRONG, which implicitly
