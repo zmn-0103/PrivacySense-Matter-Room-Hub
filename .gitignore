@@ -13,6 +13,8 @@ sdkconfig.*
 # IDE and local files
 .vscode/
 .idea/
+.workbuddy/
+.reasonix/
 *.user
 *.swp
 
@@ -54,3 +56,27 @@ coredump-*.elf
 # Hardware generated files
 *.bak
 gerber-output/
+
+# Host-compiled object files (not for ESP32-C6 target)
+*.o
+*.elf
+*.bin
+*.map
+
+# Root-level build logs and artifacts
+*.log
+build_*.log
+build_*.bin
+build_*.elf
+
+# OS generated files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
