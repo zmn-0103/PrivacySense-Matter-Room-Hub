@@ -15,6 +15,7 @@
 
 #include "esp_err.h"
 #include <stdbool.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -32,6 +33,46 @@ esp_err_t network_apply_provisioned_credentials(const char *ssid, const char *pa
 
 // Query current connection state. Reads from ESP-IDF event state.
 bool network_is_connected(void);
+
+// Returns true after first successful SNTP sync. Once true, stays true for
+// the remaining power cycle (survives Wi-Fi disconnects). Used by
+// state_machine.c::get_current_time() to decide whether wall-clock time is
+// reliable enough for NIGHT window auto-switch.
+bool network_time_is_synced(void);
+
+// Returns true if credential NVS write has permanently failed (max retries
+// exhausted). The Matter layer should check this and report provisioning
+// failure instead of treating it as success.
+bool network_cred_write_permanent_failure(void);
+
+#ifdef CONFIG_NETWORK_DIAG_CONSOLE
+// Diagnostic snapshot published by network_task under mutex protection.
+typedef struct {
+    int              state;
+    uint8_t          reconnect_attempts;
+    uint8_t          auth_fail_attempts;
+    bool             provisioned;
+    bool             timer_armed;
+    uint32_t         ingress_overruns;
+    bool             cred_write_retry_pending;
+    bool             wifi_start_retry_pending;
+    bool             reconnect_deadline_valid;
+} network_diag_info_t;
+
+void network_get_diag_info(network_diag_info_t *info);
+
+// Fault injection.
+typedef enum {
+    NET_FAULT_NONE = 0,
+    NET_FAULT_BLOCK_DISCONNECT_IN_RECONFIG,
+    NET_FAULT_NVS_WRITE_FAIL,
+} net_fault_type_t;
+
+void network_inject_fault(net_fault_type_t fault);
+void network_clear_fault(net_fault_type_t fault);
+void network_clear_all_faults(void);
+void network_inject_queue_storm(void);
+#endif // CONFIG_NETWORK_DIAG_CONSOLE
 
 #ifdef __cplusplus
 }

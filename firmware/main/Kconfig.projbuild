@@ -1,0 +1,18 @@
+menu "PrivacySense Matter Room Hub"
+    config UI_RGB_DIAGNOSTIC
+        bool "RGB diagnostic color cycle"
+        default n
+        help
+            When enabled, the RGB LED cycles through 6 colours + off (2 s each)
+            instead of showing the room state. Used for hardware verification of
+            the on-board WS2812 LED. The OLED and heartbeat logging still run in
+            this mode.
+
+    config NETWORK_DIAG_CONSOLE
+        bool "Network diagnostic console commands"
+        default n
+        help
+            When enabled, registers wifi_cred, wifi_status and wifi_fault console
+            commands for Wi-Fi testing, and enables fault injection paths in the
+            network stack. Disable in production builds.
+endmenu

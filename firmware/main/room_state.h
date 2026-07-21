@@ -49,6 +49,7 @@ typedef struct {
     bool              quiet_active;     // User toggled QUIET via button/Matter
     bool              wifi_connected;
     bool              matter_commissioned;
+    bool              commissioning_active;
     bool              radar_online;
     bool              env_sensor_online;
 } room_state_t;

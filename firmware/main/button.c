@@ -196,6 +196,7 @@ void button_task(void *pvParameters)
     uint32_t press_start_ms = 0;
     bool     pressed = false;
     uint8_t  last_countdown_shown = 0;
+    uint32_t loop = 0;
 
     ESP_LOGI(TAG, "task started (stack %u bytes, prio %d)",
              (unsigned)uxTaskGetStackHighWaterMark(NULL), (int)uxTaskPriorityGet(NULL));
@@ -291,5 +292,12 @@ feed_wdt:
         // (BUTTON_TASK_TIMEOUT_MS) per task-architecture.md §7.2. When the
         // button is held, the poll interval is 100 ms — still well under 2 s.
         ESP_ERROR_CHECK(esp_task_wdt_reset());
+
+        if ((++loop % 50) == 0) {
+            ESP_LOGI(TAG, "heartbeat: loop=%u, stack_hwm=%u bytes, isr_drops=%lu",
+                     (unsigned)loop,
+                     (unsigned)uxTaskGetStackHighWaterMark(NULL),
+                     (unsigned long)s_isr_drops);
+        }
     }
 }

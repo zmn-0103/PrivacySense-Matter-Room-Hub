@@ -93,11 +93,22 @@ extern "C" {
 #define PIN_PHOTO_LM393_DO_GPIO GPIO_NUM_10   // Optional, not initialised in v1
 
 // ---------------------------------------------------------------------------
-// Reserved / Strapping pins (do NOT use in firmware)
+// Strapping pins (ESP32-C6 Technical Reference Manual)
 // ---------------------------------------------------------------------------
-// GPIO 12 / 13 — USB D-/D+ (on-board USB Serial/JTAG, default)
-// GPIO 15     — Strapping, unused in first version
-// GPIO 16 / 17 — U0TXD/U0RXD, reserved for console / download
+// All Strapping pins:
+//   GPIO 4  (MTMS) — used as UART1 TX for radar; verify cold-boot level
+//   GPIO 5  (MTDI) — used as UART1 RX for radar; verify cold-boot level
+//   GPIO 8  (GPIO) — RGB LED (only allowed load on this pin)
+//   GPIO 9  (GPIO) — Boot button (internal pull-up ensures high at boot)
+//   GPIO 15 (GPIO) — unused in first version
+//
+// JTAG pins (GPIO 4-7):
+//   GPIO 4 (MTMS), GPIO 5 (MTDI), GPIO 6 (MTCK), GPIO 7 (MTDO)
+//   GPIO 6/7 used for I2C bus 0 (OLED). JTAG function is not used in v1.
+//
+// Reserved:
+//   GPIO 12 / 13 — USB D-/D+ (on-board USB Serial/JTAG, default)
+//   GPIO 16 / 17 — U0TXD/U0RXD, reserved for console / download
 
 #ifdef __cplusplus
 }

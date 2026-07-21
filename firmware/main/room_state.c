@@ -40,10 +40,11 @@ esp_err_t room_state_init(void)
     s_state.pre_night_mode      = MODE_NORMAL;
     s_state.env_alert           = ALERT_OK;
     s_state.quiet_active        = false;
-    s_state.wifi_connected      = false;
-    s_state.matter_commissioned = false;
-    s_state.radar_online        = false;
-    s_state.env_sensor_online   = false;
+    s_state.wifi_connected         = false;
+    s_state.matter_commissioned    = false;
+    s_state.commissioning_active   = false;
+    s_state.radar_online           = false;
+    s_state.env_sensor_online      = false;
 
     ESP_LOGI(TAG, "init ok (sizeof(room_state_t)=%u)", (unsigned)sizeof(s_state));
     return ESP_OK;

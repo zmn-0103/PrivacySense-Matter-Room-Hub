@@ -1,490 +1,1016 @@
 // PrivacySense Matter Room Hub - network.c
 //
-// Wi-Fi Station management with proper lifecycle:
-//   - On boot: if ESP-IDF Wi-Fi NVS has saved credentials, start STA and
-//     connect automatically.
-//   - On disconnect: schedule a reconnect via xTimer (async, non-blocking)
-//     with exponential backoff capped at 60 s. Auth failures (bad passphrase)
-//     stop after 3 attempts and report "needs re-commissioning".
-//   - On reconnect success: backoff counter reset to 0.
-//
-// Event flow (task-architecture.md §3, §5.1, §6.1):
-//   ESP-IDF Wi-Fi/IP event loop (event-loop task context)
-//     → on_wifi_event / on_ip_event update internal state and enqueue a
-//       status into s_status_queue (xQueueOverwrite, non-blocking)
-//   network_task
-//     → blocks on s_status_queue with 2 s timeout (TWDT feed)
-//     → on wake, builds app_event_t(EVENT_NETWORK_STATUS) and sends to
-//       g_app_event_queue (consumed by state_machine_task, which is the
-//       ONLY writer to room_state.wifi_connected).
-//
-// Reconnect scheduling:
-//   esp_wifi_connect() is called from the network_task context (NOT from the
-//   Wi-Fi event handler), triggered by a one-shot FreeRTOS xTimer. This
-//   avoids blocking the event-loop task and gives us precise control over
-//   backoff timing. The timer is created in network_init and reused for the
-//   lifetime of the system.
-//
-// SECURITY:
-//   - SSID and passphrase are NEVER logged, NEVER compiled in, NEVER stored
-//     in our own config module. They live in ESP-IDF Wi-Fi NVS namespace only.
-//   - esp_matter Wi-Fi provisioning pushes credentials through the BLE
-//     commissioning channel and into ESP-IDF Wi-Fi storage directly.
+// Wi-Fi Station management with single-owner state (phase 3).
+// Callbacks enqueue commands non-blocking; network_task serialises all SM.
 
 #include "network.h"
 
 #include <string.h>
+#include <stdlib.h>
+#include <time.h>
+#include <inttypes.h>
+#include <stdatomic.h>
+#include <strings.h>
 
 #include "esp_log.h"
 #include "esp_task_wdt.h"
 #include "esp_wifi.h"
 #include "esp_netif.h"
 #include "esp_event.h"
+#include "esp_sntp.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
-#include "freertos/timers.h"
 
-#include "state_machine.h"   // g_app_event_queue, app_event_t, network_status_t
+#include "network_reconnect_sm.h"
+#include "state_machine.h"
 
 static const char *TAG = "network";
 
-// Wi-Fi SSID max length per IEEE 802.11 is 32 bytes. ESP-IDF wifi_config_t
-// .sta.ssid is 32 bytes (no NUL terminator in the field itself; the API
-// treats it as a counted byte string, not NUL-terminated).
 #define WIFI_SSID_MAX_LEN  32U
 #define WIFI_PWD_MAX_LEN   64U
+#define NETWORK_TASK_TIMEOUT_MS  2000U
+#define NETWORK_QUEUE_SEND_MS    20U
+#define MAX_ACTION_RECOVERY_ITER  3U
+#define MAX_CRED_WRITE_RETRIES    3U
+#define CRED_WRITE_BACKOFF_MS  1000U
 
-#define NETWORK_TASK_TIMEOUT_MS  2000U   // task-architecture.md §7.2 (≤ 2 s feed gap)
-#define NETWORK_QUEUE_SEND_MS    20U     // bounded wait per task-architecture.md §5.3
+// ─── SNTP ───
+static atomic_bool s_timezone_configured = false;
+static atomic_bool s_time_synced = false;
 
-// Reconnect policy (commissioning-lifecycle.md §3.4):
-//   - Generic disconnect (beacon loss, AP restart, transient RF): exponential
-//     backoff 1→2→4→8→16→32→60 s, capped at 60 s. Counter resets to 0 on
-//     successful IP acquisition.
-//   - Auth failure (WIFI_REASON_AUTH_FAIL / 4WAY_HANDSHAKE_TIMEOUT /
-//     HANDSHAKE_TIMEOUT): the saved passphrase is wrong; retrying with the
-//     same credentials is pointless. Allow up to AUTH_FAIL_MAX_ATTEMPTS
-//     attempts (in case of transient AP-side issues) then STOP and wait for
-//     re-commissioning.
-#define WIFI_RECONNECT_BACKOFF_BASE_MS  1000U
-#define WIFI_RECONNECT_BACKOFF_MAX_MS   60000U
-#define WIFI_AUTH_FAIL_MAX_ATTEMPTS     3U
-
-// Single-slot "latest status" queue (depth 1 + xQueueOverwrite). This fixes
-// the event-group race where CONNECTED and DISCONNECTED bits could both be
-// set, causing the task to emit contradictory states. With xQueueOverwrite,
-// only the most recent status survives; the task consumes exactly one status
-// per iteration. Producers (event handlers) never block.
-static QueueHandle_t s_status_queue = NULL;
-
-// Reconnect state. Written ONLY from the Wi-Fi event handler context (which
-// is single-threaded: ESP-IDF runs the default event loop on one task).
-// Read by network_task when firing the reconnect timer.
-static uint8_t            s_reconnect_attempts   = 0;
-static uint8_t            s_auth_fail_attempts   = 0;
-static bool               s_provisioned          = false;
-static bool               s_connected            = false;
-static bool               s_reconnect_stopped    = false;   // auth-fail stop
-static TimerHandle_t      s_reconnect_timer      = NULL;
-
-// Forward declarations
-static void enqueue_network_status(network_status_t status, uint32_t timestamp_ms);
-static void send_network_status(network_status_t status, uint32_t timestamp_ms);
-static void schedule_reconnect(void);
-static void reconnect_timer_callback(TimerHandle_t timer);
-
-// Returns true if the disconnect reason indicates an authentication /
-// handshake failure (wrong passphrase). For these reasons, retrying with
-// the same credentials is pointless — we count them separately and stop
-// after WIFI_AUTH_FAIL_MAX_ATTEMPTS to avoid hammering the AP.
-static bool reason_is_auth_fail(uint8_t reason)
+static void on_sntp_sync(struct timeval *tv)
 {
-    switch (reason) {
-    case WIFI_REASON_AUTH_FAIL:
-    case WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT:
-    case WIFI_REASON_HANDSHAKE_TIMEOUT:
-    case WIFI_REASON_MIC_FAILURE:
-    case WIFI_REASON_802_1X_AUTH_FAILED:
-        return true;
-    default:
-        return false;
+    (void)tv;
+    if (!atomic_load(&s_time_synced)) {
+        atomic_store(&s_time_synced, true);
+        ESP_LOGI(TAG, "SNTP: time synced");
     }
 }
 
-static void on_wifi_event(void *arg, esp_event_base_t base,
-                          int32_t id, void *data)
+static void init_sntp(void)
 {
-    (void)arg;
+    bool tz_ok = (setenv("TZ", "CST-8", 1) == 0);
+    if (!tz_ok) ESP_LOGW(TAG, "setenv(TZ) failed");
+    tzset();
+    if (tz_ok) atomic_store(&s_timezone_configured, true);
+    esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
+    esp_sntp_setservername(0, "pool.ntp.org");
+    esp_sntp_set_time_sync_notification_cb(on_sntp_sync);
+    esp_sntp_init();
+    ESP_LOGI(TAG, "SNTP: polling pool.ntp.org (%s)", tz_ok ? "CST-8" : "TZ unset");
+}
 
-    if (base != WIFI_EVENT) {
-        return;
+bool network_time_is_synced(void)
+{
+    return atomic_load(&s_timezone_configured) && atomic_load(&s_time_synced);
+}
+
+// ─── Single-owner state ───
+static net_sm_t s_sm;
+static bool     s_network_initialized = false;
+
+static atomic_bool   s_connected_atomic   = false;
+static atomic_bool   s_provisioned_atomic = false;
+
+// ─── Command queue payload ───
+typedef enum {
+    NET_CMD_WIFI_STA_START = 0,
+    NET_CMD_WIFI_DISCONNECTED,
+    NET_CMD_IP_GOT_IP,
+    NET_CMD_TIMER_FIRED,
+    NET_CMD_WRITE_CREDENTIALS,
+    NET_CMD_RECONFIG_TIMEOUT,
+} net_cmd_type_t;
+
+typedef struct {
+    net_cmd_type_t type;
+    uint8_t        disconnect_reason;
+    uint8_t        timer_generation;   // valid for TIMER_FIRED
+    uint32_t       sequence;           // monotonic, for ordering
+} net_cmd_t;
+
+// ─── Single bounded command transport ───
+// All producers enter the same short critical section. This makes sequence
+// assignment and insertion one operation, so callbacks cannot create the
+// main-queue/overflow reordering that the previous two-container design had.
+//
+// If the ring saturates, producers enter spill mode. Existing ring entries
+// are drained first; while spill mode is active no producer can bypass the
+// spill slots. Link events coalesce to the latest observed link state, while
+// the one outstanding credential transaction retains its first command.
+// This is bounded, non-blocking, and records every overload episode.
+#define NETWORK_CMD_RING_DEPTH  32U
+typedef struct {
+    net_cmd_t entries[NETWORK_CMD_RING_DEPTH];
+    uint8_t head;
+    uint8_t count;
+    uint32_t next_sequence;
+    uint32_t overrun_count;
+    bool spill_active;
+    bool spill_link_valid;
+    net_cmd_t spill_link;
+    bool spill_credential_valid;
+    net_cmd_t spill_credential;
+    TaskHandle_t task_handle;
+} net_cmd_transport_t;
+
+static net_cmd_transport_t s_cmd_transport;
+static portMUX_TYPE s_cmd_transport_lock = portMUX_INITIALIZER_UNLOCKED;
+
+// ─── Credential mailbox ───
+// network_task holds s_cred_mutex for copy + NVS write + cleanup (sole writer).
+// commissioning callback uses take(0); if busy, returns error.
+static SemaphoreHandle_t s_cred_mutex = NULL;
+static wifi_config_t     s_pending_wifi_cfg;
+static bool              s_pending_creds_valid = false;
+
+typedef enum {
+    CRED_WRITE_OK,
+    CRED_WRITE_TRANSIENT,    // mutex busy — retry, don't count
+    CRED_WRITE_RETRYABLE,    // NVS write fail — count toward MAX_CRED_WRITE_RETRIES
+    CRED_WRITE_FATAL,
+} cred_write_result_t;
+
+// ─── NETWORK_STATUS pending (monotonic sequence) ───
+static atomic_int    s_pending_status_val = -1;
+static atomic_uint   s_pending_status_seq = 0;
+static atomic_uint   s_delivered_status_seq = 0;
+
+// ─── NVS write retry state (written only by network_task) ───
+static uint8_t  s_cred_write_retries = 0;
+static bool     s_cred_write_retry_pending = false;
+static uint32_t s_cred_write_next_retry_ms = 0;
+static atomic_bool s_cred_write_permanent_failure = false;
+static bool     s_cred_cleanup_pending = false;
+
+// ─── Wi-Fi start retry (independent from NVS write) ───
+#define MAX_WIFI_START_RETRIES  5U
+#define WIFI_START_BACKOFF_MS  2000U
+static uint8_t  s_wifi_start_retries = 0;
+static bool     s_wifi_start_retry_pending = false;
+static uint32_t s_wifi_start_next_retry_ms = 0;
+
+#ifdef CONFIG_NETWORK_DIAG_CONSOLE
+// ─── Diagnostic snapshot (network_task-owned, mutex-protected) ───
+static SemaphoreHandle_t  s_diag_mutex = NULL;
+static network_diag_info_t s_diag_snapshot;
+
+static void diag_publish_snapshot(void)
+{
+    if (!s_diag_mutex) return;
+    if (xSemaphoreTake(s_diag_mutex, pdMS_TO_TICKS(10)) != pdTRUE) return;
+    s_diag_snapshot.state                    = (int)s_sm.state;
+    s_diag_snapshot.reconnect_attempts       = s_sm.reconnect_attempts;
+    s_diag_snapshot.auth_fail_attempts       = s_sm.auth_fail_attempts;
+    s_diag_snapshot.provisioned              = s_sm.provisioned;
+    s_diag_snapshot.timer_armed              = s_sm.timer_armed;
+    s_diag_snapshot.cred_write_retry_pending = s_cred_write_retry_pending;
+    s_diag_snapshot.wifi_start_retry_pending = s_wifi_start_retry_pending;
+    s_diag_snapshot.reconnect_deadline_valid = s_reconnect_deadline_valid;
+    // Read overrun_count inside the transport lock.
+    portENTER_CRITICAL(&s_cmd_transport_lock);
+    s_diag_snapshot.ingress_overruns = s_cmd_transport.overrun_count;
+    s_cmd_transport.overrun_count = 0;
+    portEXIT_CRITICAL(&s_cmd_transport_lock);
+    xSemaphoreGive(s_diag_mutex);
+}
+
+void network_get_diag_info(network_diag_info_t *info)
+{
+    if (!info || !s_diag_mutex) return;
+    if (xSemaphoreTake(s_diag_mutex, pdMS_TO_TICKS(100)) != pdTRUE) return;
+    *info = s_diag_snapshot;
+    xSemaphoreGive(s_diag_mutex);
+}
+
+// ─── Fault injection ───
+static atomic_int s_fault_flags;
+
+void network_inject_fault(net_fault_type_t fault)
+{
+    atomic_fetch_or(&s_fault_flags, (int)(1u << (unsigned)fault));
+    ESP_LOGW(TAG, "fault injected: %d", (int)fault);
+}
+
+void network_clear_fault(net_fault_type_t fault)
+{
+    atomic_fetch_and(&s_fault_flags, (int)~(1u << (unsigned)fault));
+    ESP_LOGI(TAG, "fault cleared: %d", (int)fault);
+}
+
+void network_clear_all_faults(void)
+{
+    atomic_store(&s_fault_flags, 0);
+    ESP_LOGI(TAG, "all faults cleared");
+}
+
+static bool fault_active(net_fault_type_t fault)
+{
+    return (atomic_load(&s_fault_flags) & (int)(1u << (unsigned)fault)) != 0;
+}
+
+// Forward decl for queue storm.
+static bool command_enqueue(net_cmd_t cmd);
+
+void network_inject_queue_storm(void)
+{
+    uint32_t pre;
+    portENTER_CRITICAL(&s_cmd_transport_lock);
+    pre = s_cmd_transport.overrun_count;
+    portEXIT_CRITICAL(&s_cmd_transport_lock);
+
+    for (int i = 0; i < 40; i++) {
+        net_cmd_t cmd = {
+            .type = NET_CMD_WIFI_DISCONNECTED,
+            .disconnect_reason = 201,
+        };
+        if (!command_enqueue(cmd)) break;
     }
 
-    switch (id) {
-    case WIFI_EVENT_STA_START:
-        // STA started — connect immediately. This path is hit on the first
-        // esp_wifi_start() and after esp_wifi_disconnect() + esp_wifi_connect().
-        // No backoff here: this is the first connection attempt for this
-        // session, not a reconnect.
-        ESP_LOGI(TAG, "STA started, attempting connect");
-        esp_wifi_connect();
-        break;
+    uint32_t post;
+    portENTER_CRITICAL(&s_cmd_transport_lock);
+    post = s_cmd_transport.overrun_count;
+    portEXIT_CRITICAL(&s_cmd_transport_lock);
 
+    ESP_LOGW(TAG, "queue storm: injected 40 cmds, overrun_count %" PRIu32 " -> %" PRIu32,
+             pre, post);
+}
+#endif // CONFIG_NETWORK_DIAG_CONSOLE
+
+// ─── Task-owned reconnect deadline ───
+// No FreeRTOS software timer is used. network_task owns both fields and
+// injects TIMER_FIRED directly, eliminating callback-generation races.
+static bool     s_reconnect_deadline_valid = false;
+static uint32_t s_reconnect_deadline_ms = 0;
+static bool     s_reconfig_deadline_valid = false;
+static uint32_t s_reconfig_started_ms = 0;
+static uint32_t s_reconfig_deadline_ms = 0;
+
+static void execute_action(const net_sm_action_t *act);
+static void process_command(const net_cmd_t *cmd);
+
+static network_status_t status_to_public(net_sm_status_t s)
+{
+    switch (s) {
+    case NET_SM_STATUS_CONNECTED:    return NETWORK_STATUS_CONNECTED;
+    case NET_SM_STATUS_PROVISIONED:  return NETWORK_STATUS_PROVISIONED;
+    default:                         return NETWORK_STATUS_DISCONNECTED;
+    }
+}
+
+static bool command_is_link_event(net_cmd_type_t type)
+{
+    return type == NET_CMD_WIFI_STA_START ||
+           type == NET_CMD_WIFI_DISCONNECTED ||
+           type == NET_CMD_IP_GOT_IP;
+}
+
+static bool sequence_before(uint32_t lhs, uint32_t rhs)
+{
+    return (int32_t)(lhs - rhs) < 0;
+}
+
+// Non-blocking MPSC ingress. The critical section contains only bounded
+// memory operations; task notification happens after the lock is released.
+static bool command_enqueue(net_cmd_t cmd)
+{
+    TaskHandle_t task_to_notify;
+    bool retained = true;
+
+    portENTER_CRITICAL(&s_cmd_transport_lock);
+    cmd.sequence = ++s_cmd_transport.next_sequence;
+
+    if (!s_cmd_transport.spill_active &&
+        s_cmd_transport.count < NETWORK_CMD_RING_DEPTH) {
+        uint8_t tail = (uint8_t)((s_cmd_transport.head +
+                                 s_cmd_transport.count) %
+                                NETWORK_CMD_RING_DEPTH);
+        s_cmd_transport.entries[tail] = cmd;
+        s_cmd_transport.count++;
+    } else {
+        s_cmd_transport.spill_active = true;
+        s_cmd_transport.overrun_count++;
+
+        if (command_is_link_event(cmd.type)) {
+            // ESP Wi-Fi/IP callbacks run on the default event-loop task, so
+            // last-wins here represents the latest observed physical state.
+            s_cmd_transport.spill_link = cmd;
+            s_cmd_transport.spill_link_valid = true;
+        } else if (cmd.type == NET_CMD_WRITE_CREDENTIALS) {
+            // The credential mailbox admits only one transaction. Preserve
+            // the first command/sequence; retries are task-owned deadlines.
+            if (!s_cmd_transport.spill_credential_valid) {
+                s_cmd_transport.spill_credential = cmd;
+                s_cmd_transport.spill_credential_valid = true;
+            }
+        } else {
+            // TIMER_FIRED and RECONFIG_TIMEOUT are generated directly by
+            // network_task and must never enter this producer path.
+            retained = false;
+        }
+    }
+
+    task_to_notify = s_cmd_transport.task_handle;
+    portEXIT_CRITICAL(&s_cmd_transport_lock);
+
+    if (task_to_notify != NULL) xTaskNotifyGive(task_to_notify);
+    return retained;
+}
+
+// FIFO entries always predate spill entries. Once spill mode starts, all
+// producers stay in spill mode until the ring and both spill slots are empty,
+// preventing newer commands from bypassing older retained commands.
+static bool command_pop(net_cmd_t *out)
+{
+    bool have_command = false;
+
+    portENTER_CRITICAL(&s_cmd_transport_lock);
+    if (s_cmd_transport.count > 0) {
+        *out = s_cmd_transport.entries[s_cmd_transport.head];
+        s_cmd_transport.head = (uint8_t)((s_cmd_transport.head + 1U) %
+                                         NETWORK_CMD_RING_DEPTH);
+        s_cmd_transport.count--;
+        have_command = true;
+    } else if (s_cmd_transport.spill_link_valid ||
+               s_cmd_transport.spill_credential_valid) {
+        bool take_link = s_cmd_transport.spill_link_valid;
+        if (take_link && s_cmd_transport.spill_credential_valid) {
+            take_link = sequence_before(s_cmd_transport.spill_link.sequence,
+                                        s_cmd_transport.spill_credential.sequence);
+        }
+
+        if (take_link) {
+            *out = s_cmd_transport.spill_link;
+            s_cmd_transport.spill_link_valid = false;
+        } else {
+            *out = s_cmd_transport.spill_credential;
+            s_cmd_transport.spill_credential_valid = false;
+        }
+        have_command = true;
+    }
+
+    if (s_cmd_transport.count == 0 &&
+        !s_cmd_transport.spill_link_valid &&
+        !s_cmd_transport.spill_credential_valid) {
+        s_cmd_transport.spill_active = false;
+    }
+    portEXIT_CRITICAL(&s_cmd_transport_lock);
+    return have_command;
+}
+
+static uint32_t command_take_overrun_count(void)
+{
+    uint32_t count;
+    portENTER_CRITICAL(&s_cmd_transport_lock);
+    count = s_cmd_transport.overrun_count;
+    s_cmd_transport.overrun_count = 0;
+    portEXIT_CRITICAL(&s_cmd_transport_lock);
+    return count;
+}
+
+static void command_transport_set_task(TaskHandle_t task)
+{
+    portENTER_CRITICAL(&s_cmd_transport_lock);
+    s_cmd_transport.task_handle = task;
+    portEXIT_CRITICAL(&s_cmd_transport_lock);
+}
+
+// ─── Event handlers (non-blocking) ───
+static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *data)
+{
+    (void)arg;
+    if (base != WIFI_EVENT) return;
+    switch (id) {
+    case WIFI_EVENT_STA_START: {
+        ESP_LOGI(TAG, "STA started");
+        net_cmd_t cmd = { .type = NET_CMD_WIFI_STA_START };
+        if (!command_enqueue(cmd)) ESP_LOGE(TAG, "STA_START enqueue failed");
+        break;
+    }
     case WIFI_EVENT_STA_DISCONNECTED: {
         wifi_event_sta_disconnected_t *disc = data;
-        s_connected = false;
-        enqueue_network_status(NETWORK_STATUS_DISCONNECTED,
-                               xTaskGetTickCount() * portTICK_PERIOD_MS);
+        ESP_LOGW(TAG, "STA disconnected (reason=%u)", (unsigned)disc->reason);
+        net_cmd_t cmd = { .type = NET_CMD_WIFI_DISCONNECTED,
+                          .disconnect_reason = disc->reason };
+        if (!command_enqueue(cmd)) ESP_LOGE(TAG, "DISCONNECTED enqueue failed");
+        break;
+    }
+    default: break;
+    }
+}
 
-        if (s_reconnect_stopped) {
-            // Already gave up due to auth fail; do not schedule further
-            // reconnects. User must re-commission.
-            ESP_LOGW(TAG, "STA disconnected (reason=%u); reconnect stopped "
-                     "(needs re-commissioning)", (unsigned)disc->reason);
-            break;
+static void on_ip_event(void *arg, esp_event_base_t base, int32_t id, void *data)
+{
+    (void)arg; (void)data;
+    if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
+        ESP_LOGI(TAG, "STA got IP");
+        net_cmd_t cmd = { .type = NET_CMD_IP_GOT_IP };
+        if (!command_enqueue(cmd)) ESP_LOGE(TAG, "GOT_IP enqueue failed");
+    }
+}
+
+// ─── Action executor with recovery loop ───
+static void execute_action(const net_sm_action_t *act)
+{
+    net_sm_action_t cur = *act;
+    for (uint32_t iter = 0; iter < MAX_ACTION_RECOVERY_ITER; ++iter) {
+        uint32_t f = cur.flags;
+
+        if (f & NET_SM_ACT_STOP_TIMER) {
+            s_reconnect_deadline_valid = false;
         }
 
-        if (reason_is_auth_fail(disc->reason)) {
-            s_auth_fail_attempts++;
-            ESP_LOGW(TAG, "STA auth fail (reason=%u, attempt=%u/%u)",
-                     (unsigned)disc->reason,
-                     (unsigned)s_auth_fail_attempts,
-                     (unsigned)WIFI_AUTH_FAIL_MAX_ATTEMPTS);
-            if (s_auth_fail_attempts >= WIFI_AUTH_FAIL_MAX_ATTEMPTS) {
-                ESP_LOGE(TAG, "STA auth fail max attempts reached; STOPPING "
-                         "reconnect. Device needs re-commissioning with new "
-                         "credentials (commissioning-lifecycle.md §3.4).");
-                s_reconnect_stopped = true;
-                break;
+        if (f & NET_SM_ACT_START_TIMER) {
+            uint32_t now_ms = xTaskGetTickCount() * portTICK_PERIOD_MS;
+            s_reconnect_deadline_ms = now_ms + cur.timer_delay_ms;
+            s_reconnect_deadline_valid = true;
+            ESP_LOGI(TAG, "reconnect timer armed for %" PRIu32 " ms", cur.timer_delay_ms);
+        }
+
+        if (f & NET_SM_ACT_WIFI_DISCONNECT) {
+            esp_err_t ret = esp_wifi_disconnect();
+            if (ret != ESP_OK && ret != ESP_ERR_WIFI_NOT_STARTED) {
+                ESP_LOGW(TAG, "esp_wifi_disconnect: %s", esp_err_to_name(ret));
+                net_sm_event_t fe = { .type = NET_SM_EVENT_ACTION_FAILED,
+                                      .fail_type = NET_SM_FAIL_WIFI_DISCONNECT };
+                net_sm_action_t recovery;
+                if (net_sm_step(&s_sm, &fe, &recovery)) {
+                    if ((recovery.flags & NET_SM_ACT_NOTIFY_STATUS) == 0 &&
+                        (cur.flags & NET_SM_ACT_NOTIFY_STATUS)) {
+                        recovery.flags |= NET_SM_ACT_NOTIFY_STATUS;
+                        recovery.notify_status = cur.notify_status;
+                    }
+                    cur = recovery;
+                    continue;
+                }
+                if (cur.flags & NET_SM_ACT_NOTIFY_STATUS) goto do_notify;
+                return;
             }
-            // Fall through to schedule_reconnect() — give the AP a chance to
-            // recover (some APs have transient auth issues during roam).
-        } else {
-            ESP_LOGW(TAG, "STA disconnected (reason=%u); scheduling reconnect",
-                     (unsigned)disc->reason);
         }
 
-        schedule_reconnect();
-        break;
-    }
+        if (f & NET_SM_ACT_WIFI_CONNECT) {
+            esp_err_t ret = esp_wifi_connect();
+            if (ret != ESP_OK) {
+                ESP_LOGW(TAG, "esp_wifi_connect: %s", esp_err_to_name(ret));
+                net_sm_event_t fe = { .type = NET_SM_EVENT_ACTION_FAILED,
+                                      .fail_type = NET_SM_FAIL_WIFI_CONNECT };
+                net_sm_action_t recovery;
+                if (net_sm_step(&s_sm, &fe, &recovery)) {
+                    if ((recovery.flags & NET_SM_ACT_NOTIFY_STATUS) == 0 &&
+                        (cur.flags & NET_SM_ACT_NOTIFY_STATUS)) {
+                        recovery.flags |= NET_SM_ACT_NOTIFY_STATUS;
+                        recovery.notify_status = cur.notify_status;
+                    }
+                    cur = recovery;
+                    continue;
+                }
+                if (cur.flags & NET_SM_ACT_NOTIFY_STATUS) goto do_notify;
+                return;
+            }
+        }
 
-    default:
-        break;
-    }
-}
-
-static void on_ip_event(void *arg, esp_event_base_t base,
-                        int32_t id, void *data)
-{
-    (void)arg;
-    (void)data;
-
-    if (base != IP_EVENT || id != IP_EVENT_STA_GOT_IP) {
+do_notify:
+        if (f & NET_SM_ACT_NOTIFY_STATUS) {
+            network_status_t pub = status_to_public(cur.notify_status);
+            atomic_store(&s_connected_atomic, pub == NETWORK_STATUS_CONNECTED);
+            uint32_t seq = atomic_fetch_add(&s_pending_status_seq, 1) + 1;
+            app_event_t ev = {
+                .type = EVENT_NETWORK_STATUS, .data.network = pub,
+                .timestamp_ms = xTaskGetTickCount() * portTICK_PERIOD_MS,
+            };
+            if (xQueueSend(g_app_event_queue, &ev,
+                           pdMS_TO_TICKS(NETWORK_QUEUE_SEND_MS)) == pdTRUE) {
+                atomic_store(&s_delivered_status_seq, seq);
+            } else {
+                atomic_store(&s_pending_status_val, (int)pub);
+                atomic_store(&s_pending_status_seq, seq);
+                ESP_LOGW(TAG, "app_event_queue full; STATUS(%d) stashed seq=%" PRIu32,
+                         (int)pub, seq);
+            }
+            if (cur.notify_status == NET_SM_STATUS_STOPPED) {
+                ESP_LOGE(TAG, "reconnect STOPPED");
+            }
+        }
         return;
     }
-    s_connected = true;
-    // Reset ALL reconnect state — we are back to a clean slate.
-    s_reconnect_attempts = 0;
-    s_auth_fail_attempts = 0;
-    s_reconnect_stopped  = false;
-    // If a reconnect timer was pending, cancel it — we are connected now.
-    if (s_reconnect_timer != NULL) {
-        xTimerStop(s_reconnect_timer, 0);
-    }
-    enqueue_network_status(NETWORK_STATUS_CONNECTED,
-                           xTaskGetTickCount() * portTICK_PERIOD_MS);
-    ESP_LOGI(TAG, "STA got IP, connected");
+    ESP_LOGE(TAG, "action recovery loop exhausted");
 }
 
-// Compute the next backoff delay and (re)arm the one-shot reconnect timer.
-// Called from the Wi-Fi event handler context. The actual esp_wifi_connect()
-// call happens in reconnect_timer_callback (network_task timer-service
-// context), so the event handler never blocks on Wi-Fi internals.
-static void schedule_reconnect(void)
+// ─── Mailbox cleanup helpers ───
+// Returns true if mailbox was cleared under mutex, setting permanent_failure.
+// Retry-safe: returns true even if mailbox was already cleared, so callers
+// can unconditionally advance to final-failure state.
+static bool clear_credential_mailbox(void)
 {
-    if (s_reconnect_timer == NULL) {
-        ESP_LOGE(TAG, "schedule_reconnect: timer is NULL (network_init "
-                 "incomplete?)");
-        return;
+    if (xSemaphoreTake(s_cred_mutex, pdMS_TO_TICKS(50)) != pdTRUE) return false;
+    if (s_pending_creds_valid) {
+        s_pending_creds_valid = false;
+        explicit_bzero(&s_pending_wifi_cfg, sizeof(s_pending_wifi_cfg));
     }
-    s_reconnect_attempts++;
-    // Exponential backoff: 1, 2, 4, 8, 16, 32, 60, 60, 60, ...
-    uint32_t delay_ms = WIFI_RECONNECT_BACKOFF_BASE_MS
-                        << (s_reconnect_attempts - 1);
-    if (delay_ms > WIFI_RECONNECT_BACKOFF_MAX_MS) {
-        delay_ms = WIFI_RECONNECT_BACKOFF_MAX_MS;
-    }
-    // xTimerChangePeriod also (re)starts the timer.
-    if (xTimerChangePeriod(s_reconnect_timer, pdMS_TO_TICKS(delay_ms), 0)
-        != pdPASS) {
-        ESP_LOGE(TAG, "xTimerChangePeriod failed (delay=%u ms)",
-                 (unsigned)delay_ms);
-    }
-    ESP_LOGI(TAG, "reconnect scheduled in %u ms (attempt=%u)",
-             (unsigned)delay_ms, (unsigned)s_reconnect_attempts);
+    atomic_store(&s_cred_write_permanent_failure, true);
+    xSemaphoreGive(s_cred_mutex);
+    return true;
 }
 
-static void reconnect_timer_callback(TimerHandle_t timer)
+static void cred_write_final_failure(void)
 {
-    (void)timer;
-    // Runs in the FreeRTOS timer-service task context. Safe to call
-    // esp_wifi_connect() here — it is non-blocking and just queues a connect
-    // request internally. If it fails, the subsequent STA_DISCONNECTED event
-    // will trigger another schedule_reconnect().
-    if (s_connected || s_reconnect_stopped) {
-        return;   // raced with a connection / auth-fail-stop
+    ESP_LOGE(TAG, "cred write failed; giving up");
+    s_cred_write_retry_pending = false;
+    if (clear_credential_mailbox()) {
+        s_cred_cleanup_pending = false;
+        s_cred_write_retries = 0;
+    } else {
+        s_cred_cleanup_pending = true;
     }
-    ESP_LOGI(TAG, "reconnect timer fired, calling esp_wifi_connect()");
-    esp_err_t ret = esp_wifi_connect();
+}
+
+// Returns true if a retry was scheduled; false if max retries exhausted.
+// `count` true for actual NVS write failures, false for transient (mutex busy).
+static bool handle_cred_write_retry(bool count)
+{
+    if (count) {
+        s_cred_write_retries++;
+        if (s_cred_write_retries >= MAX_CRED_WRITE_RETRIES) {
+            cred_write_final_failure();
+            return false;
+        }
+    }
+    s_cred_write_next_retry_ms =
+        xTaskGetTickCount() * portTICK_PERIOD_MS + CRED_WRITE_BACKOFF_MS;
+    s_cred_write_retry_pending = true;
+    return true;
+}
+
+// Wi-Fi start retry with independent limit (P1-5).
+static bool handle_wifi_start_retry(void)
+{
+    s_wifi_start_retries++;
+    if (s_wifi_start_retries >= MAX_WIFI_START_RETRIES) {
+        ESP_LOGE(TAG, "esp_wifi_start failed %u times; giving up",
+                 s_wifi_start_retries);
+        cred_write_final_failure();
+        s_wifi_start_retries = 0;
+        return false;
+    }
+    s_wifi_start_next_retry_ms =
+        xTaskGetTickCount() * portTICK_PERIOD_MS + WIFI_START_BACKOFF_MS;
+    s_wifi_start_retry_pending = true;
+    return true;
+}
+
+// ─── Write credentials to NVS ───
+// Holds s_cred_mutex for copy + NVS write; clears mailbox only on success
+// (or final failure via cred_write_final_failure).
+// Callback uses take(0) so it is never blocked — it returns error if
+// the mutex is held.
+static cred_write_result_t write_pending_credentials(void)
+{
+    if (xSemaphoreTake(s_cred_mutex, 0) != pdTRUE) {
+        return CRED_WRITE_TRANSIENT;  // mutex busy, don't count
+    }
+    if (!s_pending_creds_valid) {
+        xSemaphoreGive(s_cred_mutex);
+        return CRED_WRITE_FATAL;
+    }
+
+    // Copy credentials locally but do NOT destroy the mailbox yet —
+    // if NVS write fails we need the original for retry.
+    wifi_config_t local_cfg = s_pending_wifi_cfg;
+    // Mutex still held — callback take(0) will fail, which is safe.
+
+#ifdef CONFIG_NETWORK_DIAG_CONSOLE
+    if (fault_active(NET_FAULT_NVS_WRITE_FAIL)) {
+        network_clear_fault(NET_FAULT_NVS_WRITE_FAIL);
+        ESP_LOGW(TAG, "fault: injecting NVS write failure");
+        xSemaphoreGive(s_cred_mutex);
+        return CRED_WRITE_RETRYABLE;
+    }
+#endif
+
+    esp_err_t ret = esp_wifi_set_config(WIFI_IF_STA, &local_cfg);
+    explicit_bzero(&local_cfg, sizeof(local_cfg));
+
     if (ret != ESP_OK) {
-        ESP_LOGW(TAG, "esp_wifi_connect: %s — will retry on next disconnect",
-                 esp_err_to_name(ret));
+        ESP_LOGE(TAG, "esp_wifi_set_config: %s", esp_err_to_name(ret));
+        // Mailbox still valid for retry; mutex released.
+        xSemaphoreGive(s_cred_mutex);
+        return CRED_WRITE_RETRYABLE;
     }
+
+    // NVS write succeeded — now clear the mailbox.
+    s_pending_creds_valid = false;
+    explicit_bzero(&s_pending_wifi_cfg, sizeof(s_pending_wifi_cfg));
+    atomic_store(&s_cred_write_permanent_failure, false);
+    xSemaphoreGive(s_cred_mutex);
+
+    ESP_LOGI(TAG, "credentials written to NVS");
+    return CRED_WRITE_OK;
+}
+
+// ─── Command processor ───
+static void process_command(const net_cmd_t *cmd)
+{
+    net_sm_event_t ev = { 0 };
+    switch (cmd->type) {
+    case NET_CMD_WIFI_STA_START:
+        ev.type = NET_SM_EVENT_STA_START;
+        ev.has_saved_creds = atomic_load(&s_provisioned_atomic);
+        break;
+    case NET_CMD_WIFI_DISCONNECTED:
+        #ifdef CONFIG_NETWORK_DIAG_CONSOLE
+        if (fault_active(NET_FAULT_BLOCK_DISCONNECT_IN_RECONFIG) &&
+            s_sm.state == NET_SM_STATE_RECONFIGURING) {
+            ESP_LOGW(TAG, "fault: dropping DISCONNECTED in RECONFIGURING");
+            return;
+        }
+        #endif
+        ev.type = NET_SM_EVENT_DISCONNECTED;
+        ev.disconnect_reason = cmd->disconnect_reason;
+        break;
+    case NET_CMD_IP_GOT_IP:
+        ev.type = NET_SM_EVENT_GOT_IP;
+        break;
+    case NET_CMD_TIMER_FIRED:
+        ev.type = NET_SM_EVENT_TIMER_FIRED;
+        ev.timer_generation = cmd->timer_generation;
+        break;
+    case NET_CMD_WRITE_CREDENTIALS: {
+        esp_err_t sr = esp_wifi_start();
+        if (sr != ESP_OK) {
+            ESP_LOGE(TAG, "esp_wifi_start: %s", esp_err_to_name(sr));
+            if (!handle_wifi_start_retry()) return;
+            return;
+        }
+        s_wifi_start_retries = 0;
+        s_wifi_start_retry_pending = false;
+
+        cred_write_result_t wr = write_pending_credentials();
+        switch (wr) {
+        case CRED_WRITE_OK:
+            s_cred_write_retries = 0;
+            s_cred_write_retry_pending = false;
+            atomic_store(&s_provisioned_atomic, true);
+            ev.type = NET_SM_EVENT_PROVISIONED;
+            break;
+        case CRED_WRITE_TRANSIENT:
+            if (!handle_cred_write_retry(false)) return;
+            return;
+        case CRED_WRITE_RETRYABLE:
+            if (!handle_cred_write_retry(true)) return;
+            return;
+        case CRED_WRITE_FATAL:
+            cred_write_final_failure();
+            return;
+        }
+        break;
+    }
+    case NET_CMD_RECONFIG_TIMEOUT:
+        ev.type = NET_SM_EVENT_RECONFIG_TIMEOUT;
+        break;
+    default:
+        return;
+    }
+
+    net_sm_action_t act;
+    bool changed = net_sm_step(&s_sm, &ev, &act);
+    if (act.flags != 0) execute_action(&act);
+    if (changed) {
+        ESP_LOGI(TAG, "sm: event=%d -> state=%d attempts=%u auth_fail=%u",
+                 (int)ev.type, (int)s_sm.state,
+                 (unsigned)s_sm.reconnect_attempts,
+                 (unsigned)s_sm.auth_fail_attempts);
+    }
+}
+
+// ─── Reconcile pending events ───
+static void reconcile_pending_events(void)
+{
+    // Retry stashed NETWORK_STATUS; only deliver if sequence is newer.
+    int stashed = atomic_load(&s_pending_status_val);
+    uint32_t stashed_seq = atomic_load(&s_pending_status_seq);
+    uint32_t delivered_seq = atomic_load(&s_delivered_status_seq);
+    if (stashed >= 0 && sequence_before(delivered_seq, stashed_seq)) {
+        network_status_t pub = (network_status_t)stashed;
+        app_event_t ev = {
+            .type = EVENT_NETWORK_STATUS, .data.network = pub,
+            .timestamp_ms = xTaskGetTickCount() * portTICK_PERIOD_MS,
+        };
+        if (xQueueSend(g_app_event_queue, &ev,
+                       pdMS_TO_TICKS(NETWORK_QUEUE_SEND_MS)) == pdTRUE) {
+            atomic_store(&s_delivered_status_seq, stashed_seq);
+            atomic_store(&s_pending_status_val, -1);
+        }
+    }
+
 }
 
 esp_err_t network_init(void)
 {
-    if (s_status_queue != NULL) {
-        return ESP_ERR_INVALID_STATE;
-    }
+    if (s_network_initialized) return ESP_ERR_INVALID_STATE;
 
-    // Single-slot queue for "latest network status". xQueueOverwrite ensures
-    // only the most recent status is kept; producers never block, consumers
-    // always read the latest. This replaces the previous event-group design
-    // which could accumulate contradictory CONNECTED+DISCONNECTED bits.
-    s_status_queue = xQueueCreate(1, sizeof(network_status_t));
-    if (s_status_queue == NULL) {
-        return ESP_ERR_NO_MEM;
-    }
+    esp_err_t ret = ESP_ERR_NO_MEM;
+    memset(&s_cmd_transport, 0, sizeof(s_cmd_transport));
+    s_reconnect_deadline_valid = false;
+    s_reconfig_deadline_valid = false;
 
-    // One-shot reconnect timer. Period is changed dynamically by
-    // schedule_reconnect(); the timer is never auto-reloaded.
-    s_reconnect_timer = xTimerCreate("wifi_reconnect",
-                                     pdMS_TO_TICKS(WIFI_RECONNECT_BACKOFF_MAX_MS),
-                                     pdFALSE,   // one-shot
-                                     NULL,
-                                     reconnect_timer_callback);
-    if (s_reconnect_timer == NULL) {
-        vQueueDelete(s_status_queue);
-        s_status_queue = NULL;
-        return ESP_ERR_NO_MEM;
-    }
+    s_cred_mutex = xSemaphoreCreateMutex();
+    if (!s_cred_mutex) goto fail_rollback;
 
-    // --- ESP-IDF Wi-Fi init order (esp-idf v5.4.1 wifi.rst) ---
-    // 1) esp_netif_init() — creates the TCP/IP stack. Tolerate INVALID_STATE
-    //    in case esp_matter or another caller already initialised it.
-    esp_err_t ret = esp_netif_init();
-    if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
-        ESP_LOGE(TAG, "esp_netif_init: %s", esp_err_to_name(ret));
-        goto fail_rollback;
-    }
+    #ifdef CONFIG_NETWORK_DIAG_CONSOLE
+    s_diag_mutex = xSemaphoreCreateMutex();
+    if (!s_diag_mutex) goto fail_rollback;
+    #endif
 
-    // 2) Default event loop — required by esp_wifi event delivery. Tolerate
-    //    INVALID_STATE because esp_matter may create it first.
+    ret = esp_netif_init();
+    if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) goto fail_rollback;
+
     ret = esp_event_loop_create_default();
-    if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
-        ESP_LOGE(TAG, "esp_event_loop_create_default: %s", esp_err_to_name(ret));
-        goto fail_rollback;
-    }
+    if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) goto fail_rollback;
 
-    // 3) STA netif — must exist before esp_wifi_start() so IP events can bind.
-    //    esp_netif_create_default_wifi_sta() asserts internally on duplicate;
-    //    guard with a check via esp_netif_get_handle_from_ifkey.
     if (esp_netif_get_handle_from_ifkey("WIFI_STA_DEF") == NULL) {
-        esp_netif_create_default_wifi_sta();
+        if (esp_netif_create_default_wifi_sta() == NULL) {
+            ESP_LOGE(TAG, "failed to create default WiFi STA netif");
+            ret = ESP_FAIL;
+            goto fail_rollback;
+        }
     }
 
-    // 4) Wi-Fi driver init with default config.
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ret = esp_wifi_init(&cfg);
-    if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
-        ESP_LOGE(TAG, "esp_wifi_init: %s", esp_err_to_name(ret));
-        goto fail_rollback;
-    }
+    if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) goto fail_rollback;
 
-    // 5) Register event handlers for reconnect logic.
-    ret = esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID,
-                                     &on_wifi_event, NULL);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "register WIFI_EVENT handler: %s", esp_err_to_name(ret));
-        goto fail_rollback;
-    }
-    ret = esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP,
-                                     &on_ip_event, NULL);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "register IP_EVENT handler: %s", esp_err_to_name(ret));
-        goto fail_rollback_handler;
-    }
+    ret = esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &on_wifi_event, NULL);
+    if (ret != ESP_OK) goto fail_rollback;
+    ret = esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &on_ip_event, NULL);
+    if (ret != ESP_OK) goto fail_rollback_wifi_handler;
 
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+    ret = esp_wifi_set_mode(WIFI_MODE_STA);
+    if (ret != ESP_OK) goto fail_rollback_both_handlers;
 
-    // 6) If ESP-IDF Wi-Fi NVS already has credentials (saved from a previous
-    //    commissioning), start Wi-Fi now and let the on_wifi_event handler
-    //    drive the first connection attempt. If no credentials are saved,
-    //    esp_wifi_start() still succeeds but STA will stay unconnected until
-    //    network_apply_provisioned_credentials() is called from the BLE
-    //    commissioning path.
-    //
-    //    We detect saved credentials by loading the STA config and checking
-    //    if the SSID field has any non-zero byte. ESP-IDF stores SSID as a
-    //    32-byte field (not NUL-terminated when length == 32), so we must
-    //    scan the whole field, not just the first byte. esp_wifi_get_config()
-    //    returns ESP_ERR_NVS if nothing is stored, which we treat as
-    //    "not provisioned".
     wifi_config_t existing_cfg = {0};
     ret = esp_wifi_get_config(WIFI_IF_STA, &existing_cfg);
     bool has_saved_ssid = false;
     if (ret == ESP_OK) {
         for (size_t i = 0; i < sizeof(existing_cfg.sta.ssid); ++i) {
-            if (existing_cfg.sta.ssid[i] != 0) {
-                has_saved_ssid = true;
-                break;
-            }
+            if (existing_cfg.sta.ssid[i] != 0) { has_saved_ssid = true; break; }
         }
     }
-    if (has_saved_ssid) {
-        s_provisioned = true;
-        ESP_LOGI(TAG, "saved Wi-Fi credentials found; starting STA");
-    } else {
-        ESP_LOGI(TAG, "no saved Wi-Fi credentials; waiting for commissioning");
-    }
-    // Either way, start the radio. STA_START event will fire and, if
-    // provisioned, on_wifi_event will call esp_wifi_connect().
-    ESP_ERROR_CHECK(esp_wifi_start());
+    atomic_store(&s_provisioned_atomic, has_saved_ssid);
+    net_sm_init(&s_sm, has_saved_ssid);
 
-    ESP_LOGI(TAG, "init ok (STA mode; credentials via esp_matter provisioning)");
+    if (has_saved_ssid) ESP_LOGI(TAG, "saved credentials found");
+    else ESP_LOGI(TAG, "no saved credentials");
+
+    ret = esp_wifi_start();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "esp_wifi_start: %s", esp_err_to_name(ret));
+        goto fail_rollback_both_handlers;
+    }
+
+    init_sntp();
+    s_network_initialized = true;
+    ESP_LOGI(TAG, "init ok");
     return ESP_OK;
 
-fail_rollback_handler:
+fail_rollback_both_handlers:
+    esp_event_handler_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP, &on_ip_event);
+fail_rollback_wifi_handler:
     esp_event_handler_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, &on_wifi_event);
 fail_rollback:
-    xTimerDelete(s_reconnect_timer, 0);
-    s_reconnect_timer = NULL;
-    vQueueDelete(s_status_queue);
-    s_status_queue = NULL;
+    if (s_cred_mutex) { vSemaphoreDelete(s_cred_mutex); s_cred_mutex = NULL; }
+    memset(&s_cmd_transport, 0, sizeof(s_cmd_transport));
+    s_reconnect_deadline_valid = false;
+    s_reconfig_deadline_valid = false;
     return ret;
 }
 
+// ─── Commissioning callback ───
 esp_err_t network_apply_provisioned_credentials(const char *ssid,
                                                 const char *password)
 {
-    if (ssid == NULL || password == NULL) {
-        return ESP_ERR_INVALID_ARG;
+    if (!s_network_initialized || s_cred_mutex == NULL) {
+        return ESP_ERR_INVALID_STATE;
     }
-    // Validate lengths against ESP-IDF wifi_config_t field sizes. SSID is a
-    // 32-byte counted string (full 32 bytes valid, no NUL needed in the
-    // field); password is 64-byte (NUL-terminated). Reject over-length inputs
-    // instead of silently truncating — a truncated SSID connects to the wrong
-    // network and a truncated password never authenticates.
+    if (!ssid || !password) return ESP_ERR_INVALID_ARG;
     size_t ssid_len = strlen(ssid);
     size_t pwd_len  = strlen(password);
-    if (ssid_len == 0 || ssid_len > WIFI_SSID_MAX_LEN) {
-        ESP_LOGE(TAG, "invalid SSID length %u (must be 1..%u)",
-                 (unsigned)ssid_len, WIFI_SSID_MAX_LEN);
-        return ESP_ERR_INVALID_ARG;
-    }
-    if (pwd_len > WIFI_PWD_MAX_LEN) {
-        ESP_LOGE(TAG, "invalid password length %u (must be 0..%u)",
-                 (unsigned)pwd_len, WIFI_PWD_MAX_LEN);
-        return ESP_ERR_INVALID_ARG;
-    }
-    // Never log the SSID/password. Length-only log is acceptable for debugging.
-    ESP_LOGI(TAG, "applying provisioned credentials (ssid_len=%u, pwd_len=%u)",
+    if (ssid_len == 0 || ssid_len > WIFI_SSID_MAX_LEN) return ESP_ERR_INVALID_ARG;
+    if (pwd_len > WIFI_PWD_MAX_LEN) return ESP_ERR_INVALID_ARG;
+
+    ESP_LOGI(TAG, "credential receipt (ssid_len=%u, pwd_len=%u)",
              (unsigned)ssid_len, (unsigned)pwd_len);
 
-    wifi_config_t wifi_cfg = {0};
-    // Copy exactly ssid_len bytes. .sta.ssid is a 32-byte field; in ESP-IDF
-    // v5.4.1 wifi_sta_config_t has NO ssid_length member (only wifi_ap_config_t
-    // has ssid_len). When ssid_len < 32 we NUL-terminate so the SSID also works
-    // as a string; when ssid_len == 32 the field is full and esp_wifi treats it
-    // as a counted 32-byte SSID (no NUL needed).
-    memcpy(wifi_cfg.sta.ssid, ssid, ssid_len);
-    if (ssid_len < WIFI_SSID_MAX_LEN) {
-        wifi_cfg.sta.ssid[ssid_len] = '\0';
+    // Non-blocking: take(0). If busy (network_task writing), return error.
+    if (xSemaphoreTake(s_cred_mutex, 0) != pdTRUE) {
+        ESP_LOGW(TAG, "cred mailbox busy");
+        return ESP_ERR_INVALID_STATE;
     }
-    // Password is NUL-terminated in wifi_config_t; pwd_len < 64 leaves the
-    // trailing NUL from {0} initialiser in place.
-    memcpy(wifi_cfg.sta.password, password, pwd_len);
 
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_cfg));
-    s_provisioned       = true;
-    // New credentials → reset reconnect / auth-fail state so a fresh attempt
-    // is made even if the previous ones gave up.
-    s_reconnect_attempts  = 0;
-    s_auth_fail_attempts  = 0;
-    s_reconnect_stopped   = false;
+    if (s_pending_creds_valid) {
+        xSemaphoreGive(s_cred_mutex);
+        ESP_LOGW(TAG, "previous credentials unconsumed");
+        return ESP_ERR_INVALID_STATE;
+    }
 
-    // If esp_wifi_start() has not been called yet (network_init path with no
-    // saved credentials), start it now. If already started, this is a no-op
-    // for the radio; we still need to issue a connect for the new config.
-    esp_wifi_start();
-    esp_wifi_disconnect();   // ensure clean state before connecting
-    esp_wifi_connect();
+    // Write credentials into the mailbox (callback only owns s_cred_mutex;
+    // retry state is owned by network_task and never touched here — P1-4).
+    atomic_store(&s_cred_write_permanent_failure, false);  // only safe under mutex
+    memset(&s_pending_wifi_cfg, 0, sizeof(s_pending_wifi_cfg));
+    memcpy(s_pending_wifi_cfg.sta.ssid, ssid, ssid_len);
+    if (ssid_len < WIFI_SSID_MAX_LEN) s_pending_wifi_cfg.sta.ssid[ssid_len] = '\0';
+    memcpy(s_pending_wifi_cfg.sta.password, password, pwd_len);
+    s_pending_creds_valid = true;
+    xSemaphoreGive(s_cred_mutex);
 
-    // Notify state machine so it can reflect "provisioned, connecting" state.
-    send_network_status(NETWORK_STATUS_PROVISIONED,
-                        xTaskGetTickCount() * portTICK_PERIOD_MS);
+    net_cmd_t cmd = { .type = NET_CMD_WRITE_CREDENTIALS };
+    (void)command_enqueue(cmd);  // credential commands always have a spill slot
     return ESP_OK;
 }
 
 bool network_is_connected(void)
 {
-    return s_connected;
+    return atomic_load(&s_connected_atomic);
 }
 
-// Overwrite the single-slot "latest status" queue. Called from event-loop
-// task context (Wi-Fi/IP event handlers). Never blocks.
-static void enqueue_network_status(network_status_t status, uint32_t timestamp_ms)
+bool network_cred_write_permanent_failure(void)
 {
-    // xQueueOverwrite always succeeds for a depth-1 queue: it discards any
-    // pending item and writes the new one. This guarantees the consumer
-    // (network_task) always sees the most recent status.
-    (void)xQueueOverwrite(s_status_queue, &status);
-    (void)timestamp_ms;   // timestamp is taken by the consumer at read time
+    return atomic_load(&s_cred_write_permanent_failure);
 }
 
-// Build an app_event_t(EVENT_NETWORK_STATUS) and forward to the unified
-// app_event_queue. Bounded 20 ms wait per task-architecture.md §5.3.
-static void send_network_status(network_status_t status, uint32_t timestamp_ms)
+static bool deadline_due(uint32_t now_ms, uint32_t deadline_ms)
 {
-    app_event_t ev = {
-        .type         = EVENT_NETWORK_STATUS,
-        .data.network = status,
-        .timestamp_ms = timestamp_ms,
-    };
-    if (xQueueSend(g_app_event_queue, &ev,
-                   pdMS_TO_TICKS(NETWORK_QUEUE_SEND_MS)) != pdTRUE) {
-        ESP_LOGW(TAG, "app_event_queue full; NETWORK_STATUS(%d) dropped",
-                 (int)status);
-        // TODO: increment a per-category drop counter and expose via
-        //       diagnostics (task-architecture.md §5.3).
+    return (int32_t)(now_ms - deadline_ms) >= 0;
+}
+
+static uint32_t deadline_remaining_ms(uint32_t now_ms, uint32_t deadline_ms)
+{
+    int32_t remaining = (int32_t)(deadline_ms - now_ms);
+    return remaining > 0 ? (uint32_t)remaining : 0U;
+}
+
+static void reduce_wait_to_deadline(uint32_t now_ms, uint32_t deadline_ms,
+                                    uint32_t *wait_ms)
+{
+    uint32_t remaining = deadline_remaining_ms(now_ms, deadline_ms);
+    if (remaining < *wait_ms) *wait_ms = remaining;
+}
+
+static uint32_t network_next_wait_ms(uint32_t now_ms)
+{
+    uint32_t wait_ms = NETWORK_TASK_TIMEOUT_MS;
+
+    if (s_reconnect_deadline_valid) {
+        reduce_wait_to_deadline(now_ms, s_reconnect_deadline_ms, &wait_ms);
     }
+    if (s_cred_write_retry_pending) {
+        reduce_wait_to_deadline(now_ms, s_cred_write_next_retry_ms, &wait_ms);
+    }
+    if (s_wifi_start_retry_pending) {
+        reduce_wait_to_deadline(now_ms, s_wifi_start_next_retry_ms, &wait_ms);
+    }
+    if (s_cred_cleanup_pending && wait_ms > 50U) wait_ms = 50U;
+
+    if (s_reconfig_deadline_valid) {
+        reduce_wait_to_deadline(now_ms, s_reconfig_deadline_ms, &wait_ms);
+    }
+    return wait_ms;
 }
 
 void network_task(void *pvParameters)
 {
     (void)pvParameters;
     ESP_ERROR_CHECK(esp_task_wdt_add(NULL));
-
+    command_transport_set_task(xTaskGetCurrentTaskHandle());
     ESP_LOGI(TAG, "task started (stack %u bytes, prio %d)",
              (unsigned)uxTaskGetStackHighWaterMark(NULL), (int)uxTaskPriorityGet(NULL));
 
-    for (;;) {
-        // Block on the single-slot latest-status queue. 2 s timeout feeds TWDT.
-        // Each iteration consumes at most ONE status — no risk of emitting
-        // contradictory CONNECTED+DISCONNECTED in the same wake-up.
-        network_status_t status;
-        if (xQueueReceive(s_status_queue, &status,
-                          pdMS_TO_TICKS(NETWORK_TASK_TIMEOUT_MS)) == pdTRUE) {
-            uint32_t now_ms = xTaskGetTickCount() * portTICK_PERIOD_MS;
-            send_network_status(status, now_ms);
-        }
-        // Timeout with no status → no state change to report; the state
-        // machine preserves the last known network status.
+    uint32_t loop = 0;
+    uint32_t last_diag_tick = xTaskGetTickCount();
 
-        // Feed TWDT every iteration. Max gap = NETWORK_TASK_TIMEOUT_MS (2 s)
-        // per task-architecture.md §7.2.
+    for (;;) {
+        loop++;
+        bool did_work = false;
+
+        // Drain the single ordered ingress before task-owned deadlines. The
+        // bounded budget prevents a noisy producer from starving retries,
+        // timeout checks, diagnostics, or the watchdog.
+        for (uint32_t i = 0; i < NETWORK_CMD_RING_DEPTH + 2U; ++i) {
+            net_cmd_t cmd;
+            if (!command_pop(&cmd)) break;
+            process_command(&cmd);
+            did_work = true;
+            ESP_ERROR_CHECK(esp_task_wdt_reset());
+        }
+
+        uint32_t now_ms = xTaskGetTickCount() * portTICK_PERIOD_MS;
+
+        // Credential write retry (NVS write count-limited).
+        if (s_cred_write_retry_pending &&
+            deadline_due(now_ms, s_cred_write_next_retry_ms)) {
+            s_cred_write_retry_pending = false;
+            net_cmd_t cmd = { .type = NET_CMD_WRITE_CREDENTIALS };
+            process_command(&cmd);
+            did_work = true;
+        }
+
+        // Wi-Fi start retry (independent count-limited).
+        if (s_wifi_start_retry_pending &&
+            deadline_due(now_ms, s_wifi_start_next_retry_ms)) {
+            s_wifi_start_retry_pending = false;
+            net_cmd_t cmd = { .type = NET_CMD_WRITE_CREDENTIALS };
+            process_command(&cmd);
+            did_work = true;
+        }
+
+        // Mailbox cleanup retry (deferred from cred_write_final_failure).
+        if (s_cred_cleanup_pending) {
+            if (clear_credential_mailbox()) {
+                s_cred_cleanup_pending = false;
+                s_cred_write_retries = 0;
+            }
+            did_work = true;
+        }
+
+        // Defensive support for the pure SM's ACTION_FAILED contract. The
+        // deadline implementation itself cannot fail to arm.
+        if (s_sm.state == NET_SM_STATE_DISCONNECTED && s_sm.timer_arm_pending) {
+            s_sm.timer_arm_pending = false;
+            net_sm_action_t act = { 0 };
+            act.flags = NET_SM_ACT_START_TIMER;
+            act.timer_delay_ms = net_sm_compute_backoff_ms(s_sm.reconnect_attempts);
+            s_sm.timer_armed = true;
+            execute_action(&act);
+            did_work = true;
+        }
+
+        // Reconnect expiry is generated and consumed by the owning task. No
+        // callback can retain or relabel an event from an older arm cycle.
+        now_ms = xTaskGetTickCount() * portTICK_PERIOD_MS;
+        if (s_reconnect_deadline_valid &&
+            deadline_due(now_ms, s_reconnect_deadline_ms)) {
+            s_reconnect_deadline_valid = false;
+            net_cmd_t cmd = {
+                .type = NET_CMD_TIMER_FIRED,
+                .timer_generation = s_sm.timer_generation,
+            };
+            process_command(&cmd);
+            did_work = true;
+        }
+
+        // RECONFIGURING timeout via elapsed time (no second timer).
+        if (s_sm.state == NET_SM_STATE_RECONFIGURING) {
+            if (!s_reconfig_deadline_valid) {
+                s_reconfig_started_ms = now_ms;
+                s_reconfig_deadline_ms = now_ms + NET_SM_RECONFIGURING_TIMEOUT_MS;
+                s_reconfig_deadline_valid = true;
+                s_sm.reconfig_start_ms = now_ms;
+            } else if (deadline_due(now_ms, s_reconfig_deadline_ms)) {
+                uint32_t elapsed = now_ms - s_reconfig_started_ms;
+                ESP_LOGW(TAG, "RECONFIGURING timeout (%" PRIu32 " ms)", elapsed);
+                s_reconfig_deadline_valid = false;
+                s_sm.reconfig_start_ms = 0;
+                net_cmd_t cmd = { .type = NET_CMD_RECONFIG_TIMEOUT };
+                process_command(&cmd);
+                did_work = true;
+            }
+        } else {
+            s_reconfig_deadline_valid = false;
+            s_sm.reconfig_start_ms = 0;
+        }
+
+        reconcile_pending_events();
         ESP_ERROR_CHECK(esp_task_wdt_reset());
+
+        #ifdef CONFIG_NETWORK_DIAG_CONSOLE
+        diag_publish_snapshot();
+        #endif
+
+        // Periodic diagnostics include transport saturation and stack margin.
+        uint32_t now_tick = xTaskGetTickCount();
+        if ((now_tick - last_diag_tick) >= pdMS_TO_TICKS(30000)) {
+            last_diag_tick = now_tick;
+            uint32_t overruns = command_take_overrun_count();
+            if (overruns > 0) {
+                ESP_LOGW(TAG, "diag: loop=%u stack_hwm=%u ingress_overruns=%" PRIu32
+                         " st=%d", (unsigned)loop,
+                         (unsigned)uxTaskGetStackHighWaterMark(NULL), overruns,
+                         (int)s_sm.state);
+            } else {
+                ESP_LOGI(TAG, "diag: loop=%u stack_hwm=%u ingress_overruns=0 st=%d",
+                         (unsigned)loop,
+                         (unsigned)uxTaskGetStackHighWaterMark(NULL),
+                         (int)s_sm.state);
+            }
+        }
+
+        if (did_work) continue;
+
+        now_ms = xTaskGetTickCount() * portTICK_PERIOD_MS;
+        uint32_t wait_ms = network_next_wait_ms(now_ms);
+        TickType_t wait_ticks = pdMS_TO_TICKS(wait_ms);
+        if (wait_ms > 0U && wait_ticks == 0) wait_ticks = 1;
+        (void)ulTaskNotifyTake(pdTRUE, wait_ticks);
     }
 }

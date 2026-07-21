@@ -5,7 +5,7 @@
 //
 // Task profile (task-architecture.md §4.4, §7.2):
 //   - Priority 5 (medium-high)
-//   - Stack   2048 B
+//   - Stack   3072 B         // raised from 2048 (HWM was 252 B in hardware test)
 //   - Trigger event-driven (gpio_evt_queue blocking read, 2 s timeout for
 //     TWDT feed — task-architecture.md §7.2)
 //
@@ -30,7 +30,7 @@ extern "C" {
 // --- Lifecycle ---
 esp_err_t button_init(void);
 
-// button_task entry point. Created by app_main with stack 2048, prio 5.
+// button_task entry point. Created by app_main with stack 3072, prio 5.
 void button_task(void *pvParameters);
 
 #ifdef __cplusplus

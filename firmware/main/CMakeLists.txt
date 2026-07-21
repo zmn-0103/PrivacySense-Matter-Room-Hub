@@ -8,15 +8,25 @@ idf_component_register(
     SRCS
         "main.c"
         "room_state.c"
+        "occ_sm.c"
+        "env_alert_sm.c"
+        "night_window_sm.c"
+        "network_reconnect_sm.c"
         "state_machine.c"
         "button.c"
+        "mode_transition.c"
         "ui.c"
+        "ui_rgb.c"
+        "ssd1306.c"
         "network.c"
         "matter_app.c"
         "config.c"
+        "radar_diag.c"
+        "network_diag.c"
     INCLUDE_DIRS
         "."
     REQUIRES
+        console
         esp_timer
         esp_event
         esp_hw_support

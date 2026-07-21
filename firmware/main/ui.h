@@ -53,6 +53,13 @@ void ui_task(void *pvParameters);
 #define UI_LONG_PRESS_COMMITTED  255U
 void ui_set_long_press_countdown(uint8_t remaining_seconds);
 
+// ── OLED display ─────────────────────────────────────────────────────
+// Called from ui_task to render the current room state on the OLED.
+// No-op (returns ESP_OK) if OLED init failed or OLED is not populated.
+// Returns the ssd1306_flush() result so the caller can count failures and
+// back off without blocking RGB / sensors / state machine / network.
+esp_err_t ui_oled_render_state(void);
+
 #ifdef __cplusplus
 }
 #endif

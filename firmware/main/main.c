@@ -12,9 +12,9 @@
 // Build / flash / monitor (inside WSL2 Ubuntu 24.04 with esp-idf + esp-matter
 // env loaded — see docs/development-workflow.md):
 //   cd /home/projects/PrivacySense-Matter-Room-Hub/firmware
-//   idf.py -B /root/build/privacy-sense set-target esp32c6
-//   idf.py -B /root/build/privacy-sense build
-//   idf.py -B /root/build/privacy-sense -p /dev/ttyUSB0 flash monitor
+//   idf.py set-target esp32c6
+//   idf.py build
+//   idf.py -p /dev/ttyUSB0 flash monitor
 
 #include "esp_log.h"
 #include "esp_task_wdt.h"
@@ -34,13 +34,16 @@
 
 #include "ld2410c.h"
 #include "env_sensor.h"
+#include "radar_diag.h"
+#include "network_diag.h"
+#include "esp_console.h"
 
 static const char *TAG = "main";
 
 // --- Task parameters (task-architecture.md §2) ---
 #define TASK_STATE_MACHINE_STACK   6144
 #define TASK_STATE_MACHINE_PRIO    6
-#define TASK_BUTTON_STACK          2048
+#define TASK_BUTTON_STACK          3072
 #define TASK_BUTTON_PRIO           5
 #define TASK_UI_STACK              3072
 #define TASK_UI_PRIO               3
@@ -59,26 +62,38 @@ static const char *TAG = "main";
 
 static void radar_data_handler(const ld2410c_radar_data_t *data)
 {
+    static uint32_t s_radar_drop_count = 0;
+
     app_event_t ev = {
         .type         = EVENT_RADAR_DATA,
         .timestamp_ms = xTaskGetTickCount() * portTICK_PERIOD_MS,
     };
     ev.data.radar = *data;
-    // Radar events may be dropped under load (task-architecture.md §5.3);
-    // zero-wait send keeps the radar task responsive.
-    (void)xQueueSend(g_app_event_queue, &ev, 0);
+    if (xQueueSend(g_app_event_queue, &ev, 0) != pdTRUE) {
+        s_radar_drop_count++;
+        if ((s_radar_drop_count % 60) == 1) {
+            ESP_LOGW(TAG, "radar data dropped %u times (last valid=%d)",
+                     (unsigned)s_radar_drop_count, data->valid);
+        }
+    }
 }
 
 static void env_data_handler(const env_sensor_data_t *data)
 {
+    static uint32_t s_env_drop_count = 0;
+
     app_event_t ev = {
         .type         = EVENT_ENV_DATA,
         .timestamp_ms = xTaskGetTickCount() * portTICK_PERIOD_MS,
     };
     ev.data.env = *data;
-    // Env events may be dropped under load (task-architecture.md §5.3);
-    // zero-wait send keeps the env task on its 5 s cadence.
-    (void)xQueueSend(g_app_event_queue, &ev, 0);
+    if (xQueueSend(g_app_event_queue, &ev, 0) != pdTRUE) {
+        s_env_drop_count++;
+        if ((s_env_drop_count % 60) == 1) {
+            ESP_LOGW(TAG, "env data dropped %u times (last valid=%d)",
+                     (unsigned)s_env_drop_count, data->valid);
+        }
+    }
 }
 
 static void log_init_banner(void)
@@ -153,6 +168,7 @@ void app_main(void)
                                    PIN_RADAR_UART_RX_GPIO,
                                    PIN_RADAR_UART_BAUD,
                                    radar_data_handler));
+
     ESP_ERROR_CHECK(env_sensor_start(PIN_DHT22_DATA_GPIO,
                                       PIN_DHT22_RMT_CLK_HZ,
                                       env_data_handler));
@@ -210,6 +226,25 @@ void app_main(void)
                TASK_CONFIG_STACK, TASK_CONFIG_PRIO);
 
     #undef SPAWN_TASK
+
+    // Radar diagnostics console (R11 testing). No abort on failure.
+    {
+        esp_console_repl_config_t repl_cfg = ESP_CONSOLE_REPL_CONFIG_DEFAULT();
+        esp_console_dev_uart_config_t uart_cfg = ESP_CONSOLE_DEV_UART_CONFIG_DEFAULT();
+        esp_console_repl_t *repl = NULL;
+        esp_err_t r = esp_console_new_repl_uart(&uart_cfg, &repl_cfg, &repl);
+        if (r == ESP_OK) {
+            radar_diag_register();
+            #ifdef CONFIG_NETWORK_DIAG_CONSOLE
+            network_diag_register();
+            #endif
+            esp_console_register_help_command();
+            esp_console_start_repl(repl);
+        } else {
+            ESP_LOGW(TAG, "console REPL init: %s — no interactive radar diag",
+                     esp_err_to_name(r));
+        }
+    }
 
     ESP_LOGI(TAG, "all tasks spawned; app_main returning to idle");
     // app_main returns; FreeRTOS idle task runs on CPU0.
