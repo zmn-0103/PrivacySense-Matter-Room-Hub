@@ -12,7 +12,11 @@
 > - 用户现有 `OLED.c`（仅用于识别 SSD1306 命令和预期地址，不移植 STM32 软件 I2C）
 > - 用户现有 LM393 光敏电阻模块说明（首版不装，仅保留扩展口）
 >
-> **重要说明**：GPIO12/13 用于原生 USB Serial/JTAG；GPIO16/17 是 U0TXD/U0RXD，并与板载 USB-to-UART 下载/日志链路关联。为避免雷达数据和控制台互相干扰，首版雷达 UART1 改用 GPIO4/5。GPIO8、GPIO9、GPIO15 属于 Strapping 管脚，其中 GPIO8 已连接板载 RGB LED，GPIO9 已连接 Boot 按键。
+> **重要说明**：
+> - GPIO12/13 用于原生 USB Serial/JTAG；GPIO16/17 是 U0TXD/U0RXD，并与板载 USB-to-UART 下载/日志链路关联。
+> - 为避免雷达数据和控制台互相干扰，首版雷达 UART1 改用 GPIO4/5。
+> - GPIO4、GPIO5、GPIO8、GPIO9、GPIO15 均为 Strapping 管脚（ESP32-C6 技术参考手册），GPIO4–7 同时为 JTAG 引脚。GPIO8 已连接板载 RGB LED，GPIO9 已连接 Boot 按键，GPIO4/5 用于雷达 UART。
+> - **雷达 GPIO4/5 的 Strapping 影响**：GPIO4 在芯片复位/上电时被采样为 Strapping 信号（MTMS），GPIO5 同样为 Strapping（MTDI）。外接雷达 UART TX/RX 可能在复位瞬间影响 Strapping 采样电平。必须在冷启动和复位场景下验证雷达不会阻止芯片正常启动。详见 ESP32-C6 技术参考手册 "Strapping Pins" 章节。
 
 ## 1. GPIO 分配总表
 
@@ -22,16 +26,16 @@
 | GPIO 6 | I2C SDA | 双向 | SSD1306 OLED SDA, SCD40 SDA (可选) | 3.3 V | 模块无板载上拉时外接 4.7 kΩ 至 3.3 V | I2C 总线 0 |
 | GPIO 7 | I2C SCL | 输出 | SSD1306 OLED SCL, SCD40 SCL (可选) | 3.3 V | 模块无板载上拉时外接 4.7 kΩ 至 3.3 V | I2C 总线 0 |
 | GPIO 3 | 雷达 OUT | 输入 | LD2410C-P OUT（可选） | 3.3 V | 无 | 有人高、无人低；仅作冗余/调试，不代替 UART |
-| GPIO 4 | UART1 TX | 输出 | LD2410C-P RX | 3.3 V | 无 | 雷达配置命令发送 |
-| GPIO 5 | UART1 RX | 输入 | LD2410C-P TX | 3.3 V | 无 | 雷达数据连续接收 |
-| GPIO 8 | RGB LED 数据 | 输出 | DevKitC-1 板载 RGB LED | 板载电路 | 无 | 使用 ESP-IDF `led_strip`/RMT 驱动 |
+| GPIO 4 | UART1 TX | 输出 | LD2410C-P RX | 3.3 V | 无 | 雷达配置命令发送。⚠️ Strapping pin（MTMS），复位时被采样；需验证外接电平不影响 Strapping |
+| GPIO 5 | UART1 RX | 输入 | LD2410C-P TX | 3.3 V | 无 | 雷达数据连续接收。⚠️ Strapping pin（MTDI），复位时被采样；需验证外接电平不影响正常启动 |
+| GPIO 8 | RGB LED 数据 | 输出 | DevKitC-1 板载 RGB LED | 板载电路 | 无 | 使用 ESP-IDF `led_strip`/RMT 驱动。Strapping pin，禁止外接其他负载 |
 | GPIO 9 | 用户按键 | 输入 | 按键一端 → GND，另一端 → GPIO 9 | 3.3 V | 内部上拉 | DevKitC-1 Boot 按钮；Strapping 引脚，启动时需为高电平（上拉确保） |
 | GPIO 10 | 光敏数字输入（可选） | 输入 | LM393 光敏模块 DO | 3.3 V | 模块输出 | 首版不装；模块必须使用 3.3 V 供电，后续只作明/暗阈值输入 |
 | GPIO 12 | USB D- (默认) | — | 板载 USB Serial/JTAG | — | — | 默认不占用为 GPIO |
 | GPIO 13 | USB D+ (默认) | — | 板载 USB Serial/JTAG | — | — | 默认不占用为 GPIO |
 | GPIO 16 | U0TXD | 输出 | 板载 USB-to-UART | 3.3 V | 板载 | 保留下载/控制台，不连接雷达 |
 | GPIO 17 | U0RXD | 输入 | 板载 USB-to-UART | 3.3 V | 板载 | 保留下载/控制台，不连接雷达 |
-| GPIO 0–1 | 空闲 | — | — | 3.3 V | — | 预留扩展；如需 ADC 必须再次核对官方引脚映射 |
+| GPIO 0–1 | 空闲 | — | — | 3.3 V | — | 预留扩展；如需 ADC 必须再次核对官方引脚映射。GPIO4–7 为 JTAG 引脚（MTMS/MTDI/MTCK/MTDO），首版雷达占用 GPIO4/5，GPIO6/7 用于 I2C |
 | GPIO 11 | 空闲 | — | — | 3.3 V | — | 预留扩展 |
 | GPIO 14 | 空闲 | — | — | 3.3 V | — | 预留扩展 |
 | GPIO 15 | 保留 | — | — | 3.3 V | — | Strapping 管脚，首版不使用 |
@@ -182,8 +186,8 @@
 - [x] 官方 DevKitC-1 资料确认板载 RGB LED 使用 GPIO8
 - [ ] ESP32-C6-DevKitC-1 实际板级版本丝印确认
 - [x] 使用 `esptool.py flash_id` 确认实际为 16 MB Flash（2026-07-17 证据）
-- [ ] 对照实物排针丝印确认 GPIO3/4/5 与 5V/GND 位置后再接线
-- [ ] 首次上电测量开发板 5V 排针对雷达的供电电压
+- [ ] 对照实物排针丝印确认 GPIO3/4/5 与 5V/GND 位置后再接线（R12 阶段 1 验收待实物验证）
+- [ ] 首次上电测量开发板 5V 排针对雷达的供电电压并记录万用表读数（R12 阶段 1 验收待实物验证）
 
 > 本表标记的 GPIO 分配基于 ESP32-C6 芯片手册和模组规格书推导。实物到货后必须对照 DevKitC-1 原理图验证每个引脚的可用性，如有冲突在此表中更新并通知所有开发方。
 

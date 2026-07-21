@@ -6,7 +6,7 @@ Reviewer AI（ChatGPT / Codex）只对提交的代码进行复查和 bug 检查�
 
 Ubuntu 24.04 WSL2、ESP-IDF v5.4.1 和 ESP-Matter 已安装，官方示例存在构建产物，ESP32-C6 串口与 16 MB Flash 已识别。Matter commissioning 和干净 ESP-IDF shell 下的 `idf.py size` 仍待验证；详见 [开发环境搭建流程](../docs/development-environment.md) 和 [环境证据](../tests/evidence/dev-env-config-2026-07-17.md)。
 
-当前目录已有固件骨架。环境传感器已按冻结文档改为 DHT22 + RMT 接口；事件流已统一为 `app_event_queue`；Matter 数据模型已收敛为 EP0/EP1/EP2。各任务骨架中的 `TODO` 标记真实驱动实现（LD2410C V1.09 帧解析、DHT22 40-bit 解析、esp_matter endpoint 创建等）尚待 Builder AI 在首次构建验证后逐步落地。Reviewer AI 本轮未修改业务代码。
+当前目录已有固件骨架。环境传感器已按冻结文档改为 DHT22 + RMT 接口；事件流已统一为 `app_event_queue`；Matter 数据模型已收敛为 EP0/EP1/EP2。各任务骨架中仍有 `TODO` 标记真实驱动实现（esp_matter endpoint 创建、按键/网络/Matter 命令/夜间窗口处理等）；LD2410C V1.09 帧解析与 DHT22 40-bit 解析已实现并通过 Host 单元测试，待首次构建与硬件验证后落地其余项。Reviewer AI 本轮未修改业务代码。
 
 ## 工具链版本约束
 
@@ -88,23 +88,37 @@ source /root/esp/esp-matter/export.sh
 export IDF_CCACHE_ENABLE=1
 
 # 设置目标芯片，构建目录放在 WSL2 Linux 文件系统
-idf.py -B /root/build/privacy-sense set-target esp32c6
+idf.py set-target esp32c6
 
 # 配置（首次或修改 sdkconfig.defaults 后）
-idf.py -B /root/build/privacy-sense reconfigure
+idf.py reconfigure
 
-# 编译
-idf.py -B /root/build/privacy-sense build
+# 编译（必须限制并行度：Matter SDK 链接 libchip.a 极度耗内存，
+# 多线程并行链接会耗尽 RAM 导致系统挂起。-j2 在实际设备上已验证稳定。
+# 每次编译自动输出 log 文件到 firmware/ 上级目录。）
+ninja -C build -j2 all 2>&1 | \
+  tee ../build_$(date +%Y%m%d_%H%M%S).log
 
 # 烧录（通过 USB）
-idf.py -B /root/build/privacy-sense -p /dev/ttyUSB0 flash
+idf.py -p /dev/ttyUSB0 flash 2>&1 | \
+  tee ../flash_$(date +%Y%m%d_%H%M%S).log
 
-# 监视串口日志
-idf.py -B /root/build/privacy-sense -p /dev/ttyUSB0 monitor
+# 监视串口日志（每次监视自动输出 log 文件）
+idf.py -p /dev/ttyUSB0 monitor 2>&1 | \
+  tee ../monitor_$(date +%Y%m%d_%H%M%S).log
 
-# 编译 + 烧录 + 监视
-idf.py -B /root/build/privacy-sense -p /dev/ttyUSB0 flash monitor
+# 编译 + 烧录 + 监视（推荐）
+ninja -C build -j2 all 2>&1 | \
+  tee ../build_$(date +%Y%m%d_%H%M%S).log && \
+  idf.py -p /dev/ttyUSB0 flash monitor 2>&1 | \
+  tee ../monitor_$(date +%Y%m%d_%H%M%S).log
+
+# 仅烧录 + 监视（编译已完成后）
+idf.py -p /dev/ttyUSB0 flash monitor 2>&1 | \
+  tee ../monitor_$(date +%Y%m%d_%H%M%S).log
 ```
+
+> **为什么必须限制并行度？** Matter SDK 的 `libchip.a` 链接阶段单次可占用 2–4 GB RAM。Ninja 默认并行 22 个任务，多个链接进程同时运行会耗尽系统内存，导致编译卡死或 OOM kill。`-j2` 在 32 GB RAM 设备上已验证稳定通过。
 
 > 设备也可能枚举为 `/dev/ttyACM0`。以 WSL2 内实际结果为准；USB 挂载方法见开发环境文档。
 
@@ -132,9 +146,9 @@ source /root/esp/esp-matter/export.sh
 export IDF_CCACHE_ENABLE=1
 
 cd /home/projects/PrivacySense-Matter-Room-Hub/firmware
-idf.py -B /root/build/privacy-sense set-target esp32c6
-idf.py -B /root/build/privacy-sense reconfigure   # 应用 sdkconfig.defaults
-idf.py -B /root/build/privacy-sense build
+idf.py set-target esp32c6
+idf.py reconfigure   # 应用 sdkconfig.defaults
+idf.py build
 ```
 
 ### 3. 内存摘要
@@ -177,16 +191,43 @@ idf.py -B /root/build/privacy-sense build
 
 不得将 setup payload、配网码或 MAC 复制到 `tests/evidence/` Markdown、提交信息、PR 描述或任何仓库内文件中。`tests/evidence/.gitkeep` 之外的二进制文件已通过 `.gitignore` 过滤。
 
-## Builder AI 第一批代码修改清单（已完成）
+## 实际完成状态（2026-07-19）
 
-以下阻塞项已在本轮按冻结文档实施完毕，每条对应的具体改动见 git 历史：
+以下列出各模块实际完成程度，与 git 历史一致：
 
-- `main/pins.h`：增加 DHT22 `GPIO2`，删除 BME280/SHT31 首版地址定义；保留 OLED `0x3C` 和可选 SCD40 `0x62`。
-- `components/env_sensor/`：I2C 接口已下线，改为 DHT22 GPIO/RMT callback 接口；40-bit 解析、checksum、负温度、合理范围和连续失败计数仍为 `TODO`，待 Builder AI 在首次构建后补齐。
-- `main/main.c`：按新 `env_sensor_start(data_gpio, rmt_clk_hz, callback)` 启动 DHT22；I2C 只由 OLED/后续 SCD40 初始化。
-- 事件与队列：所有生产者统一发 `app_event_t` 到 `g_app_event_queue`；增加 `g_matter_report_queue`；按 `task-architecture.md §5.3` 修正队列满处理（按键/网络/Matter 不静默丢弃；雷达/环境允许丢弃但需计数 TODO）。
-- `main/matter_app.*`：首版只创建 Endpoint 0/1/2；删除任何 Endpoint 3/`stateValue` 计划；EP2 设备类型改为 `0x0027`；`ChangeToMode` 通过 `matter_app_respond_change_to_mode()` 等待状态机结果后返回（≤ 100 ms，超时不得返回 SUCCESS）。
-- `sdkconfig.defaults`：`CONFIG_ESP_TASK_WDT_TIMEOUT_S=10`，并核对所有已注册任务的最大喂狗间隔（雷达 ≤500 ms，其余 ≤2 s 或 ≤5 s）。
-- OLED：使用 ESP-IDF hardware I2C 和 7-bit `0x3C`；不得移植 STM32 bit-bang I2C 实现。
+### 已完成并经过硬件验证
 
-第一批代码完成后先做静态 review，再在 WSL 中执行首次项目构建；不要在未实现驱动时用空骨架构建结果宣称硬件功能完成。
+| 模块 | 状态 | 证据 |
+|------|------|------|
+| LD2410C 帧解析 | 完成：V1.09 normal-mode 帧解析、rolling buffer、stale timeout、断线重连 | R09 回归测试、R10 UART 断线测试 |
+| DHT22 驱动 | 完成：RMT RX 捕获、40-bit 解码、checksum、负温度、范围检查 | T07 烟雾测试 |
+| Wi-Fi 管理 | 完成：STA 初始化、凭据保存检测、重连退避、auth-fail 停止 | 代码审查 |
+| 事件队列统一 | 完成：`g_app_event_queue` 统一生产、队列满计数 | 代码审查 |
+| pins.h 连接表镜像 | 完成：GPIO 定义与 `hardware/connection-table.md` 一致 | 代码审查 |
+
+### 已实现但待首次构建验证
+
+| 模块 | 说明 |
+|------|------|
+| 状态机 | 占用/模式/环境告警三维度并行；状态转换、去抖、退出延迟；待首次运行时验证 |
+| 按键处理 | 短按切换 QUIET、长按恢复出厂；待硬件验证 |
+| env_sensor 连续失败离线 | 3 次连续失败 → 标记 offline；待首次构建后验证 |
+| task watchdog | 所有任务注册 TWDT，喂狗间隔 ≤ 设计上限；待首次运行时验证 |
+| OLED 显示 | `ssd1306.c` + `ui.c` 已实现 I2C 硬件驱动、SSD1306 初始化序列、128×64 缓冲、6×8 字体渲染与 `ui_oled_render_state()` 集成；待硬件验证 |
+| RGB 驱动 | `ui.c` 已集成 `led_strip` 组件（GPIO8 板载 WS2812），状态映射见 `render_rgb_for_state()`；待硬件验证 |
+| LD2410C 配置命令模式 | `ld2410c.c` 已实现 V1.09 命令模式（enable→cmd→disable 事务、ACK 命令字匹配、命令请求队列），Host 单元测试含官方 golden vectors 全 PASS；待真实雷达硬件验证 |
+
+### 首版规划但尚未实现
+
+| 模块 | 阻塞项或规划 |
+|------|------|
+| **Matter Endpoint 创建** | ESP-Matter API 尚未编写；`matter_app.c` 仍为骨架。需在首次静态 review 后实现 EP0/EP1/EP2 |
+| **Matter commissioning** | 依赖 Matter Endpoint 创建完成；首版使用 Test Commissionable Data Provider |
+| **OTA** | 分区 A/B 和 otadata 已配置，但 Matter OTA Requestor 未实现；见 `docs/ota-safety.md` 现阶段限制 |
+| **NVS 配置持久化** | `config.c` 已实现基本 blob 读写与校验、损坏恢复、重试逻辑；按 key 更新和迁移仍待完成 |
+
+### 已决策但无需在首次构建中实现
+
+- `I2C`：已下线 BME280/SHT31，环境传感器固定为 DHT22 GPIO 接口；I2C 仅保留给 OLED/可选 SCD40
+- 首版不创建 Endpoint 3、不上报环境告警为 Matter 属性
+- BLE 仅用于 commissioning，不用于扫描手机 MAC

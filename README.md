@@ -20,7 +20,7 @@
 - 无线：BLE commissioning，Matter over Wi-Fi。
 - 传感器：已购 HLK-LD2410C-P 毫米波雷达和 AM2302/DHT22 温湿度传感器；现有光敏模块仅作后续明暗扩展；CO2 为可选扩展。
 - 交互：开发板板载 GPIO8 RGB LED、Boot 按键，以及现有 SSD1306 OLED（首版可启用，不阻塞核心功能）。
-- 系统要求：断网本地运行、Wi-Fi 重连、配置持久化、看门狗、OTA 安全边界（见 [OTA 安全边界](docs/ota-safety.md)）。
+- 系统要求：断网本地运行、Wi-Fi 重连、基础配置持久化（NVS blob 读写已实现，迁移/逐键更新/重置仍待完成）、看门狗、OTA 安全边界（见 [OTA 安全边界](docs/ota-safety.md)）。
 - 隐私要求：不使用摄像头，不上传原始雷达数据，不保存可识别个人身份的数据。
 
 首版不同时实现 Thread 和 Wi-Fi，不接触市电负载，不把设备设计成全屋 Matter Controller。

@@ -50,9 +50,11 @@ Endpoint 2: Mode Select（设备类型 0x0027）
 |---|---|---|---|---|---|
 | 0x0000 | `occupancy` | bitmap8 | bit0: 0=unoccupied, 1=occupied | 否 | 0 |
 | 0x0001 | `occupancySensorType` | enum8 | 0x00=PIR, 0x01=Ultrasonic, 0x02=PhysicalContact | 否 | 0x00 (PIR) |
-| 0x0002 | `occupancySensorTypeBitmap` | bitmap8 | bit0=PIR, bit1=Ultrasonic, bit2=PhysicalContact | 否 | 0x01 |
+| 0x0002 | `occupancySensorTypeBitmap` | bitmap8 | bit0=PIR(0x01), bit1=Ultrasonic(0x02), bit2=PhysicalContact(0x04) | 否 | 0x01 |
 
-> **说明**：Matter 标准未定义"毫米波雷达"传感器类型。首版使用 `PIR (0x00)` 作为最接近的标准值。这不会影响功能正确性——`occupancy` 属性的语义是"检测到有人"，与传感器物理原理无关。
+> **PhysicalContact 值说明**：Matter 标准将 PhysicalContact 定义为枚举值 0x02，但 connectedhomeip 源码中实际定义为 0x03（可能在分支或版本修正中调整）。实现时应以锁定版本的 `esp-matter/connectedhomeip` 源码为准，在创建阶段确认 enum 值，不在阶段 4 前硬编码枚举。
+>
+> **Matter 1.5 FeatureMap 更新**：OccupancySensing Cluster 的 FeatureMap 在 Matter 1.5 中已增加 bit2 = Radar (0x04)。文档 0.1 版在初稿时误写"标准完全没有雷达"。实现时首版仍然使用 PIR (0x00) 作为 `occupancySensorType` 值（因为物理传感器原理上雷达更接近 PIR 而非 PhysicalContact），但 `occupancySensorTypeBitmap` 可考虑扩展 bit2 以正确声明雷达能力。需在阶段 4 实现前根据锁定 SDK 版本确认 FeatureMap 内容。
 
 > 这是作品原型的互操作折中，不等同于毫米波已被标准定义为 PIR。若进入认证或严格产品化，必须以锁定 Matter 版本的设备类型测试和目标生态兼容结果重新评审该枚举值。
 
@@ -116,6 +118,8 @@ Endpoint 2: Mode Select（设备类型 0x0027）
 - 设备收到命令后先验证 `newMode` 是否在 `SupportedModes` 中，再由本地状态机判断当前转换是否允许；只有状态真正切换后才返回成功。
 - 本地用户按键切换模式时，直接更新 `CurrentMode` 并触发属性上报。
 
+> **安全风险——cmd_ctx 跨任务传递**：ESP-Matter 的 `ChangeToMode` 命令回调中收到的 `void *cmd_ctx` 指针只在当前 Matter 事件循环上下文中有效。如果实现中将 `cmd_ctx` 通过队列/消息传递给 `state_machine_task` 或 `matter_adapter_task` 异步处理，必须在状态机返回结果前保持 `cmd_ctx` 有效，且超时后不得使用。建议方案：命令回调中只做参数验证和非法值检查，将验证结果同步返回；实际状态切换通过本地事件（`g_app_event_queue`）触发，状态机完成切换后由 `matter_adapter_task` 异步上报属性变更，不再依赖原始 `cmd_ctx`。
+
 ### 4.5 数据来源
 
 | 属性 | 数据来源 | 本地变量 | 更新触发 |
@@ -151,7 +155,7 @@ Endpoint 2: Mode Select（设备类型 0x0027）
 
 > **重要**：首版锁定的 Matter 数据模型中没有与“温湿度综合告警”语义完全匹配的标准设备类型。即使 SDK 提供 Boolean State/On-Off Sensor 能力，也不应为了凑 Endpoint 而把环境告警伪装成门锁、接触或普通开关状态。
 > 首版环境告警仅在本地状态机和 RGB/OLED 中评估，不上报为独立 Matter Endpoint。
-> 
+>
 > 后续可选方案：
 > - **方案 A**：将温湿度数据映射为标准 Temperature Sensor (0x0302) / Humidity Sensor (0x0307) Endpoint
 > - **方案 B**：使用自定义 Cluster（牺牲与第三方控制器的互操作性）

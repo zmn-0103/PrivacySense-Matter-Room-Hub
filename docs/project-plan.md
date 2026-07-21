@@ -61,6 +61,8 @@
 
 完成条件：每个模块都有独立测试记录和异常现象记录。
 
+> **实际进度（2026-07-20）**：阶段一全部模块已硬件验证并条件验收通过：LD2410C UART 通信及配置保存（R11）、DHT22、OLED、按键模式转换、RGB 状态灯（见 R12_phase1_acceptance_record.md）。电气测量因缺万用表延期。
+
 ### 阶段 2：本地状态机，3 到 5 天
 
 - 按 [状态模型](state-model.md) 实现并行三维度状态机：占用状态、用户模式、环境告警。
@@ -70,6 +72,29 @@
 
 完成条件：连续有人、连续无人、短时经过、夜间活动和雷达断线均有记录。
 
+> **实际进度（2026-07-20）**：阶段二软件门禁通过，硬件验证有条件通过，尚未全量关闭。
+>
+> - Phase 2 software/build: **PASS**
+> - Phase 2 local hardware core paths: **PASS**
+> - Overall hardware validation: **CONDITIONAL PASS**
+> - Evidence: `monitor_phase2_20260720_210630.log:338`
+>
+> | 测试 | Reviewer 结论 |
+> |---|---|
+> | T03、T04 | PASS，日志有 OCCUPIED→VACANT→OCCUPIED 证据 |
+> | T05 | 本地检测 PASS；Matter 保留最后有效值尚未验证，完整用例 PARTIAL |
+> | T06 | PASS，雷达恢复后 UNKNOWN→OCCUPIED |
+> | T07 | PASS，连续三次失败后离线，下一有效帧恢复，期间无重启 |
+> | T16 | 本地按键行为按人工观察接受；日志无 BUTTON: mode...，Matter CurrentMode 因 STUB 未验证，正式状态 PARTIAL |
+> | T01、T02 | DEFERRED，雷达行为重要用例，保留为开放项 |
+> | T17 | 合理延至阶段三 |
+> | T18 | BLOCKED，不等于失败；缺可控热源，保持开放 |
+>
+> - Open: T01, T02, T18
+> - Deferred to Phase 3: T17（SNTP/NIGHT 自动切换）
+> - Deferred to Phase 4: T05 Matter 子项（occupancy 保留最后有效值）、T16 Matter 子项（CurrentMode 读取）
+> - Known limitation: 不支持 OLED 带电插拔
+
 ### 阶段 3：Wi-Fi 与 BLE commissioning，3 到 5 天
 
 - 按 [配网生命周期](commissioning-lifecycle.md) 完成 BLE 首次配网。
@@ -78,8 +103,11 @@
 - 清理 commissioning 完成后的 BLE 资源。
 - 实现恢复出厂触发与防误触。
 - 实现配置版本迁移。
+- **补充验证 T17（SNTP/NIGHT 自动切换）**：Wi-Fi 连接后 SNTP 同步时间，验证夜间时段自动切换 NIGHT 模式及退出恢复。
 
-完成条件：首次配网、重复配网、错误密码、路由器重启和设备重启均可复现并记录。
+完成条件：首次配网、重复配网、错误密码、路由器重启和设备重启均可复现并记录；SNTP/NIGHT 自动切换验证通过。
+
+> **阶段 2 遗留项归属说明**：T05（雷达断线）和 T16（按键模式切换）的 Matter 子项（occupancy 保留最后有效值、CurrentMode 读取）属于 Matter 数据模型范畴，移至阶段 4 实现和验证，不纳入阶段 3 范围。
 
 ### 阶段 4：Matter over Wi-Fi，4 到 7 天
 
@@ -88,6 +116,8 @@
 - 将占用状态和用户模式映射到独立 Matter 属性；环境告警首版只在本地 RGB/OLED 显示，不创建虚假的 Endpoint 3。
 - 实现断网期间本地状态保持和重连后属性同步。
 - 验证控制器重启、设备离线、重新上线和状态同步。
+- **补充验证 T05 Matter 子项**：雷达断线后 Matter `occupancy` 保留上一次有效值；雷达恢复后属性同步更新。
+- **补充验证 T16 Matter 子项**：按键切换模式后 Matter `CurrentMode` 属性同步更新。
 
 完成条件：至少使用一个实际 Matter 控制器完成配网、状态读取和自动化联动，并保存演示记录。
 

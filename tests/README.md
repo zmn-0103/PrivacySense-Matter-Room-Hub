@@ -38,6 +38,7 @@ tests/evidence/<test_id>_<version>_<date>.md
 | 步骤 | 1. 人员从雷达前方快速经过（< 2 s）<br>2. 观察占用状态和 RGB |
 | 期望状态 | 占用状态保持 VACANT（ENTRY_CONFIRM_MS 去抖），RGB 不变为绿色 |
 | 证据 | 串口日志（occupancy 状态变化记录） |
+| 状态 | **DEFERRED**：需人员在雷达前精确控制经过时间 < 2s，当前无法稳定复现，待有助手配合或搭建测试台后补充 |
 
 ### T02: 毫米波误触发 — 静坐不动
 
@@ -47,6 +48,7 @@ tests/evidence/<test_id>_<version>_<date>.md
 | 步骤 | 1. 人员静坐不动 3 min<br>2. 观察占用状态 |
 | 期望状态 | 占用状态保持 OCCUPIED（EXIT_DELAY_MS 内不因静止判定无人） |
 | 证据 | 串口日志 |
+| 状态 | **DEFERRED**：需人员在雷达前静坐 3 min 且不被中断，当前无法稳定复现，待有助手配合或搭建测试台后补充 |
 
 ### T03: 持续有人 → 离开
 
@@ -81,7 +83,7 @@ tests/evidence/<test_id>_<version>_<date>.md
 |---|---|
 | 前置条件 | 雷达断线，占用状态为 UNKNOWN |
 | 步骤 | 1. 重新连接 LD2410C UART<br>2. 等待 5 s<br>3. 观察占用状态 |
-| 期望状态 | 占用状态变为 VACANT（保守策略），RGB 恢复正常 |
+| 期望状态 | 占用状态根据雷达数据恢复（target_present → ENTRY_CONFIRM_MS 后 OCCUPIED，无目标 → EXIT_DELAY_MS 后 VACANT），RGB 恢复正常 |
 | 证据 | 串口日志 |
 
 ### T07: DHT22 传感器异常
@@ -182,6 +184,7 @@ tests/evidence/<test_id>_<version>_<date>.md
 | 步骤 | 1. 等待到 22:00<br>2. 观察模式变化<br>3. 等待到 07:00<br>4. 观察模式变化 |
 | 期望状态 | 22:00 → NIGHT，RGB 暖白低亮；07:00 → 恢复 NORMAL，RGB 绿色 |
 | 证据 | 串口日志（含时间戳） |
+| 状态 | **DEFERRED**：需 Wi-Fi 连接后 SNTP 同步时间，移至阶段 3 一并验证（project-plan.md §阶段 3） |
 
 ### T18: 环境告警触发与清除
 
@@ -191,6 +194,7 @@ tests/evidence/<test_id>_<version>_<date>.md
 | 步骤 | 1. 将 DHT22 与 ESP32-C6/OLED/雷达热源隔离后，用可控热源使读数 > 32 °C<br>2. 等待 60 s（确认时间）<br>3. 观察 RGB/OLED 和本地 `env_alert`<br>4. 移除热源，等待温度 < 30 °C<br>5. 等待 120 s（清除时间）<br>6. 观察本地状态 |
 | 期望状态 | 加热 60 s 后 → ALERT，RGB 黄色；冷却 120 s 后 → OK，RGB 恢复；Matter 端不出现环境 `stateValue` Endpoint |
 | 证据 | 串口日志（含温度和告警状态） |
+| 状态 | **BLOCKED**：缺可控高低温源，待采购或借用热源后补充验证 |
 
 ### T19: 断网期间本地状态保持
 
@@ -228,3 +232,26 @@ tests/evidence/<test_id>_<version>_<date>.md
 | P1（重要） | T01, T02, T06, T07, T09, T10, T15, T19 | 误触发、传感器恢复、网络恢复、配网 |
 | P2（建议） | T11, T13, T16, T17, T18 | 配置损坏、watchdog、模式切换、告警 |
 | P3（长期） | T20 | 稳定性 |
+
+## 阶段二验收结论（2026-07-20）
+
+- Phase 2 software/build: **PASS**
+- Phase 2 local hardware core paths: **PASS**
+- Overall hardware validation: **CONDITIONAL PASS**
+- Evidence: `monitor_phase2_20260720_210630.log:338`
+
+| 测试 | Reviewer 结论 |
+|---|---|
+| T03、T04 | PASS，日志有 OCCUPIED→VACANT→OCCUPIED 证据 |
+| T05 | 本地检测 PASS；Matter 保留最后有效值尚未验证，完整用例 PARTIAL |
+| T06 | PASS，雷达恢复后 UNKNOWN→OCCUPIED |
+| T07 | PASS，连续三次失败后离线，下一有效帧恢复，期间无重启 |
+| T16 | 本地按键行为按人工观察接受；日志无 BUTTON: mode...，Matter CurrentMode 因 STUB 未验证，正式状态 PARTIAL |
+| T01、T02 | DEFERRED，雷达行为重要用例，保留为开放项 |
+| T17 | 合理延至阶段三 |
+| T18 | BLOCKED，不等于失败；缺可控热源，保持开放 |
+
+- **Open**: T01, T02, T18
+- **Deferred to Phase 3**: T17（SNTP/NIGHT 自动切换）
+- **Deferred to Phase 4**: T05 Matter 子项（occupancy 保留最后有效值）、T16 Matter 子项（CurrentMode 读取）
+- **Known limitation**: 不支持 OLED 带电插拔

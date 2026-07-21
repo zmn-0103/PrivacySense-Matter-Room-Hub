@@ -25,7 +25,7 @@ Reviewer AI 默认不得：
 - 擅自修改硬件连接、Matter 数据模型或公共接口。
 - 擅自编译、烧录、连接硬件或修改环境配置。
 
-如果用户要求 ChatGPT / Codex 直接写固件代码，应说明本角色约束，并返回设计、伪代码、接口建议或 review 意见，由 Builder AI 完成实现。项目文档只有在用户明确要求时才能由 Reviewer AI 创建或修改。
+如果用户明确要求 Reviewer AI 执行文件修改操作，Reviewer AI 可以执行。除此之外，如果用户要求 Reviewer AI 直接写固件代码，应说明本角色约束，并返回设计、伪代码、接口建议或 review 意见，由 Builder AI 完成实现。项目文档只有在用户明确要求时才能由 Reviewer AI 创建或修改。
 
 ### Other AI：Builder AI
 

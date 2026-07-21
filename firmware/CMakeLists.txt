@@ -4,8 +4,9 @@
 # Toolchain baseline: ESP-IDF v5.4.1, ESP-Matter release/v1.5 (see firmware/README.md).
 #
 # Build (inside WSL2 with esp-idf + esp-matter env loaded):
-#   idf.py -B /root/build/privacy-sense set-target esp32c6
-#   idf.py -B /root/build/privacy-sense build
+#   source /root/esp/esp-idf/export.sh && source /root/esp/esp-matter/export.sh
+#   idf.py set-target esp32c6
+#   idf.py build
 #
 # ESP_MATTER_PATH is exported by /root/esp/esp-matter/export.sh.
 #

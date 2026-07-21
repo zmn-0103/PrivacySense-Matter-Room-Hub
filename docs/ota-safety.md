@@ -7,14 +7,16 @@
 ## 2. 镜像来源
 
 | 要求 | 说明 |
-|---|---|
-| 来源 URL | HTTPS，证书由 ESP-IDF `esp_crt_bundle` 验证 |
-| 证书锁定 | 首版使用 ESP-IDF 内置 CA 证书包；不实现自定义证书锁定 |
-| URL 来源 | 存储在 NVS 中，通过 BLE commissioning 或 Matter 写入 |
-| URL 验证 | 必须以 `https://` 开头；不接受 `http://` |
+|---|---|---|
+| 来源 URL | HTTPS，证书由 ESP-IDF `esp_crt_bundle` 验证（尚未实现） |
+| 证书锁定 | 首版使用 ESP-IDF 内置 CA 证书包；不实现自定义证书锁定（尚未实现） |
+| URL 来源 | 存储在 NVS 中，通过 BLE commissioning 或 Matter 写入（尚未实现） |
+| URL 验证 | 必须以 `https://` 开头；不接受 `http://`（尚未实现） |
 | 镜像格式 | ESP-IDF OTA 镜像格式（含镜像头和签名区） |
-| OTA 流程 | 首版使用 **Matter OTA Requestor**（`CONFIG_ENABLE_OTA_REQUESTOR`），不混合自定义 HTTPS OTA 流程 |
+| OTA 流程 | **未定** — 首版暂未选择 Matter OTA Requestor 或自定义 HTTPS OTA；需在 Matter 集成阶段重新评估 |
 
+> **现阶段状态（2026-07-19）**：分区表（OTA A/B + otadata）和 `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE` 已配置，但 OTA 下载、镜像确认、版本判断和 `esp_ota_mark_app_valid_cancel_rollback()` 均未实现。以下要求为规划草案，状态标注为"尚未实现"的项待 Builder AI 实现后逐一勾销。
+>
 > **重要**：
 > - 镜像自带 SHA-256 只能证明完整性，不能证明发布者身份。
 > - 首版应明确选择 Matter OTA Requestor 或自定义 HTTPS OTA，不要混合两套流程。
@@ -106,7 +108,7 @@ Partition Table Draft (16 MB Flash, 2026-07-17 已实机确认):
 | 本地按键触发 | 双击按键检查更新 | 否（首版不做） |
 | 定时检查 | 定期从配置的 URL 检查更新 | 否（首版不做） |
 
-> 首版 OTA 以**手动触发 + HTTPS 下载 + 哈希校验 + A/B 回滚**为最小实现。不做自动检查和自动更新。
+> **现阶段（2026-07-19）**：首版 OTA 尚未实现。上述所有触发方式均为规划。A/B 分区和 otadata 已配置，但 Matter OTA Requestor、HTTPS 下载客户端、版本判断和镜像确认流程均未实现。以下各节为设计草案，待 Builder AI 在 Matter 集成阶段实现。当前不可声称 OTA 已实现。
 
 ## 8. 不做项与已知风险
 

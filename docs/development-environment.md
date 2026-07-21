@@ -46,7 +46,7 @@ ESP-IDF、ESP-Matter 及其大量子模块必须放在 WSL2 的 Linux 文件系�
 /root/esp/esp-idf
 /root/esp/esp-matter
 /home/projects/PrivacySense-Matter-Room-Hub   # 实际 WSL 项目目录
-/root/build/privacy-sense                     # 独立构建目录
+firmware/build                                # 默认构建目录（idf.py build）
 ```
 
 当前 Windows 主仓库仍位于：
@@ -255,8 +255,8 @@ source /root/esp/esp-matter/export.sh
 export IDF_CCACHE_ENABLE=1
 
 cd /home/projects/PrivacySense-Matter-Room-Hub/firmware
-idf.py -B /root/build/privacy-sense set-target esp32c6
-idf.py -B /root/build/privacy-sense build
+idf.py set-target esp32c6
+idf.py build
 ```
 
 首次成功构建后，Builder AI 必须提交：
