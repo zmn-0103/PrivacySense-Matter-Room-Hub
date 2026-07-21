@@ -1,0 +1,5 @@
+# Host-compiled test binary (not for ESP32-C6 target)
+test_parser
+
+# Object files from host compilation
+*.o
