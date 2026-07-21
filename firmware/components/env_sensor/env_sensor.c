@@ -16,6 +16,7 @@
 //     missed sample still leaves headroom (task-architecture.md §7.1).
 
 #include "env_sensor.h"
+#include "env_sensor_parser.h"
 
 #include <inttypes.h>
 #include <string.h>
@@ -53,28 +54,34 @@ static TaskHandle_t                s_task_handle  = NULL;
 static rmt_channel_handle_t        s_rmt_rx_chan  = NULL;
 static SemaphoreHandle_t          s_rx_done_sem   = NULL;
 
-// Transaction ID to defeat late callbacks. Each rmt_receive() call bumps
-// s_expected_txn before arming; the ISR captures the ID it saw at callback
-// time into s_last_txn. The task only accepts a callback result if
-// s_last_txn == s_expected_txn. A late callback from a previous (timed-out)
-// transaction will have a stale ID and is discarded.
+// Transaction ID to defeat late callbacks. DESIGN:
 //
-// Both variables are only touched from two contexts:
-//   - sensor_env_task (writes s_expected_txn, reads s_last_txn after sem take)
-//   - on_rmt_rx_done ISR (writes s_last_txn, gives sem)
-// The semaphore provides the necessary happens-before ordering for the
-// s_last_txn read in the task. s_expected_txn is only read by the ISR via a
-// stale snapshot — worst case is one extra discarded callback, which is
-// harmless.
+//   s_armed_txn — written by the task BEFORE each rmt_receive() call, set to
+//      0 when no arm is in progress (between iterations or after timeout).
+//      Read by the ISR. The ISR IGNORES the callback if s_armed_txn == 0,
+//      preventing a late callback from giving a stale semaphore token.
+//
+//   s_expected_txn — monotonically increasing counter, bumped by the task
+//      each iteration. this_txn is a local snapshot taken after the bump.
+//
+//   s_last_txn — written by the ISR from s_armed_txn. Compared against
+//      this_txn by the task after semaphore take.
+//
+// Why not s_expected_txn in the ISR? If the task times out, bumps
+// s_expected_txn, and arms a new receive, a late ISR would read the NEW
+// s_expected_txn and incorrectly stamp the stale callback as belonging to
+// the new transaction. s_armed_txn avoids this: the task clears it to 0
+// between transactions, so the stale ISR sees 0 and skips.
+//
+// Edge case: a stale ISR could fire after s_armed_txn is set for the new
+// arm but before the new DMA completes. In that case s_armed_txn != 0 and
+// the ISR gives a semaphore with stale symbol count. The subsequent
+// parse_dht22() call has a degraded symbol count vs buffer content match
+// and almost certainly fails the parse — at most one sample period with a
+// failed parse (→ retry on next 5 s period).
 static volatile uint8_t s_expected_txn = 0;
+static volatile uint8_t s_armed_txn    = 0;   // txn ID at arm time (set by task, read by ISR)
 static volatile uint8_t s_last_txn     = 0;
-
-// DHT22 valid range (state-model.md §5.2). Out-of-range samples are discarded.
-// Units: centi-celsius (1/100 °C) and per-mille (1/1000 %RH).
-#define DHT22_TEMP_MIN_CC   (-4000)    // -40.00 °C
-#define DHT22_TEMP_MAX_CC   ( 8000)    //  80.00 °C
-#define DHT22_HUMID_MIN_PM  (0)        //   0 %RH
-#define DHT22_HUMID_MAX_PM  (1000)     // 100 %RH
 
 // RMT receive buffer for one DHT22 transaction (41 symbols minimum).
 // ESP-IDF v5.4 new RMT RX API (rmt_receive) requires a caller-owned buffer.
@@ -91,10 +98,18 @@ static rmt_symbol_word_t s_rx_buf[ENV_RMT_MEM_SYMBOLS];
 static volatile size_t s_last_num_symbols = 0;
 
 // RMT receive config: pulse widths outside [min, max] are treated as gaps.
-// DHT22 pulses: 27–80 µs. Use 10 µs floor (noise filter) and 100 µs ceiling.
+// DHT22 pulses: 27–80 µs. Use 3 µs floor (noise filter) and 100 µs ceiling.
+//
+// ESP32-C6 RMT filter hardware limit (ESP-IDF v5.4, rmt_ll.h):
+//   RMT_LL_MAX_FILTER_VALUE = 255 (8-bit), filter clock = 80 MHz (PLL_F80M),
+//   so max signal_range_min_ns = 255*1e9/80e6 = 3187 ns. 10 µs (10000 ns)
+//   yields filter_reg_value=800 > 255 → rmt_receive() returns
+//   ESP_ERR_INVALID_ARG and NO sample ever succeeds. 3 µs (3000 ns) → 240,
+//   safely under the limit; DHT22 shortest pulse ≈ 27 µs so no valid data
+//   is filtered.
 // NOTE: rmt_receive_config_t in ESP-IDF v5.4 has NO flags.invert_in field;
 // input inversion is configured in rmt_rx_channel_config_t.flags instead.
-#define DHT22_SIGNAL_MIN_NS   (10UL  * 1000U)   // 10 µs
+#define DHT22_SIGNAL_MIN_NS   (3UL   * 1000U)   // 3 µs (C6 max: 3187 ns)
 #define DHT22_SIGNAL_MAX_NS   (100UL * 1000U)   // 100 µs
 static const rmt_receive_config_t s_rx_recv_cfg = {
     .signal_range_min_ns = DHT22_SIGNAL_MIN_NS,
@@ -107,19 +122,70 @@ static bool IRAM_ATTR on_rmt_rx_done(rmt_channel_handle_t chan,
 {
     (void)chan;
     (void)user_ctx;
-    // ISR context: capture symbol count AND the transaction ID that was
-    // current when the receive was armed. NO parsing here.
-    // edata->received_symbols points into the buffer passed to rmt_receive();
-    // the task copies what it needs before issuing the next rmt_receive() call.
-    //
-    // s_expected_txn may have been bumped by the task if a new transaction
-    // was already started (late callback case) — by reading it here into a
-    // local, we lock in the value that the task will compare against.
+    // ISR context: read s_armed_txn (arm-time txn ID). If the task has
+    // cleared it to 0 (between transactions or after timeout), this is a
+    // stale callback — ignore it entirely (no sem give, no data write).
+    // This avoids a late callback from a previous timed-out transaction
+    // injecting stale symbols into the current iteration.
+    uint8_t txn = s_armed_txn;
+    if (txn == 0) {
+        return false;
+    }
     s_last_num_symbols = edata->num_symbols;
-    s_last_txn         = s_expected_txn;
+    s_last_txn         = txn;
     BaseType_t high_task_woken = pdFALSE;
     xSemaphoreGiveFromISR(s_rx_done_sem, &high_task_woken);
     return (high_task_woken == pdTRUE);
+}
+
+// Diagnostics: one-shot symbol dump on first failure.
+static bool s_diag_printed        = false;
+// Rate-limit: log threshold only once per offline episode.
+static bool s_threshold_logged    = false;
+
+// Convert rmt_symbol_word_t (ESP-IDF RMT bitfield) → dht22_symbol_t (parser).
+// The ESP-IDF bitfield packs duration+level into each uint16_t; the plain
+// struct uses separate fields. Conversion is needed because env_sensor_parser.h
+// is self-contained (no ESP-IDF deps) for host-side testing.
+static dht22_symbol_t rmt_to_dht22_sym(const rmt_symbol_word_t *src)
+{
+    dht22_symbol_t dst;
+    dst.duration0 = src->duration0;
+    dst.duration1 = src->duration1;
+    dst.level0    = src->level0;
+    dst.level1    = src->level1;
+    return dst;
+}
+
+// Parse 40-bit DHT22 frame: convert RMT symbols → dht22_symbol_t, then
+// delegate to the shared dht22_parse_symbols(). Maps the result back to
+// env_sensor_data_t / env_sensor_failure_t.
+static env_sensor_failure_t parse_rmt_dht22(const rmt_symbol_word_t *items,
+                                            size_t num,
+                                            env_sensor_data_t *out)
+{
+    if (num < 41) return ENV_SENSOR_FAIL_PROTOCOL;
+
+    dht22_symbol_t converted[64];
+    size_t convert_n = (num > 64) ? 64 : num;
+    for (size_t i = 0; i < convert_n; i++) {
+        converted[i] = rmt_to_dht22_sym(&items[i]);
+    }
+
+    dht22_sample_t parsed = {0};
+    dht22_status_t st = dht22_parse_symbols(converted, convert_n, &parsed);
+    if (st == DHT22_OK) {
+        out->temperature_cc  = parsed.temperature_cc;
+        out->humidity_permil = parsed.humidity_permil;
+        out->co2_ppm         = 0;
+        out->valid           = true;
+        out->failure         = ENV_SENSOR_OK;
+        return ENV_SENSOR_OK;
+    }
+    // Map dht22_status_t → env_sensor_failure_t
+    out->failure = (st == DHT22_FAIL_RANGE) ? ENV_SENSOR_FAIL_RANGE
+                  : ENV_SENSOR_FAIL_PROTOCOL;
+    return out->failure;
 }
 
 // Pull DATA low ≥ 18 ms (DHT22 host start signal). The bus is left LOW on
@@ -140,7 +206,7 @@ static void drive_start_signal(gpio_num_t gpio)
     // Bus is held LOW here; caller will release after arming RMT.
 }
 
-static void emit_placeholder(uint32_t timestamp_ms)
+static void emit_failure(uint32_t timestamp_ms, env_sensor_failure_t reason)
 {
     env_sensor_data_t sample = {
         .timestamp_ms     = timestamp_ms,
@@ -148,6 +214,7 @@ static void emit_placeholder(uint32_t timestamp_ms)
         .humidity_permil  = 0,
         .co2_ppm          = 0,
         .valid            = false,
+        .failure          = reason,
     };
     if (s_callback) {
         s_callback(&sample);
@@ -166,6 +233,10 @@ static void sensor_env_task(void *pv)
              s_data_gpio, (unsigned)uxTaskGetStackHighWaterMark(NULL),
              (int)uxTaskPriorityGet(NULL));
 
+    // Connection-table.md §4.1: wait at least 2000 ms after power-on before
+    // the first DHT22 read (sensor needs stable VDD after power-up).
+    vTaskDelay(pdMS_TO_TICKS(2000));
+
     for (;;) {
         uint32_t timestamp_ms = xTaskGetTickCount() * portTICK_PERIOD_MS;
 
@@ -182,26 +253,32 @@ static void sensor_env_task(void *pv)
             /* discard stale token */
         }
 
-        // 3) Bump the transaction ID BEFORE arming RX. The ISR captures the
-        //    ID at callback time into s_last_txn; after the sem take we
-        //    compare s_last_txn == s_expected_txn to detect late callbacks.
-        //    Using uint8_t gives 256 transactions before wrap — far more
-        //    headroom than the 1 outstanding transaction we ever have.
+        // 3) Bump the transaction ID and set s_armed_txn BEFORE arming RX.
+        //    The ISR reads s_armed_txn at callback time; after the sem take
+        //    we check s_last_txn == this_txn. Using uint8_t gives 256
+        //    transactions before wrap — far more headroom than the 1
+        //    outstanding transaction we ever have.
+        //
+        //    s_armed_txn is set AFTER the stale-sem drain (step 2) and
+        //    BEFORE rmt_receive() (below). Between iterations (after sem
+        //    take or timeout) the task clears s_armed_txn to 0, so a late
+        //    ISR from a previous transaction sees 0 and ignores the event.
+        //
+        //    Reset s_last_txn and s_last_num_symbols to impossible values
+        //    so a stale ISR that fires after s_armed_txn is set but before
+        //    the new ISR cannot produce a false match.
         s_expected_txn++;
         uint8_t this_txn = s_expected_txn;
-
-        // 4) Arm RMT RX BEFORE releasing the bus. The 18 ms low is filtered
-        //    as a gap by signal_range_max_ns; the RMT engine is ready to
-        //    capture the sensor's response edge the instant we release.
-        //    ESP-IDF v5.4 new RMT RX API: rmt_receive() is one-shot, no
-        //    separate rmt_rx_start/stop calls.
+        s_last_txn         = 0;
         s_last_num_symbols = 0;
+        s_armed_txn        = this_txn;   // ISR reads this — NOT s_expected_txn
         esp_err_t rx_ret = rmt_receive(s_rmt_rx_chan, s_rx_buf,
                                        sizeof(s_rx_buf), &s_rx_recv_cfg);
         if (rx_ret != ESP_OK) {
+            s_armed_txn = 0;   // arm failed — ISR cannot fire for this txn
             ESP_LOGW(TAG, "rmt_receive: %s", esp_err_to_name(rx_ret));
             gpio_set_level(s_data_gpio, 1);   // release bus to idle
-            emit_placeholder(timestamp_ms);
+            emit_failure(timestamp_ms, ENV_SENSOR_FAIL_TIMEOUT);
             consecutive_failures++;
             goto feed_wdt;
         }
@@ -214,9 +291,13 @@ static void sensor_env_task(void *pv)
         //    RX channel to terminate any in-progress receive — without this,
         //    a late callback could fire on the NEXT iteration's rmt_receive
         //    and corrupt s_last_num_symbols / give a stale semaphore token.
-        //    rmt_disable() is idempotent; the channel is re-enabled by the
-        //    next rmt_receive() call (ESP-IDF v5.4 new RMT RX API: receive
-        //    internally enables the channel if it was disabled).
+        //    ESP-IDF v5.4 RMT FSM (rmt_private.h): rmt_receive() requires
+        //    fsm==ENABLE and transitions ENABLE→RUN; rmt_disable() transitions
+        //    RUN/ENABLE→INIT. rmt_receive() does NOT auto-enable a disabled
+        //    channel — calling it with fsm==INIT returns ESP_ERR_INVALID_STATE.
+        //    So after rmt_disable() in the timeout branch we MUST call
+        //    rmt_enable() (INIT→ENABLE) or every subsequent rmt_receive()
+        //    fails permanently.
         if (xSemaphoreTake(s_rx_done_sem,
                            pdMS_TO_TICKS(ENV_RMT_TIMEOUT_MS)) == pdTRUE) {
             // Got a semaphore token. Validate that it belongs to THIS
@@ -228,49 +309,93 @@ static void sensor_env_task(void *pv)
                 ESP_LOGW(TAG, "DHT22 late callback discarded "
                          "(seen_txn=%u, expected=%u)",
                          (unsigned)seen_txn, (unsigned)this_txn);
-                emit_placeholder(timestamp_ms);
+                emit_failure(timestamp_ms, ENV_SENSOR_FAIL_PROTOCOL);
                 consecutive_failures++;
                 goto feed_wdt;
             }
-            // TODO: real DHT22 parser:
-            //   1. If num < 41, mark as parse failure (insufficient symbols).
-            //   2. Walk s_rx_buf[0..num-1]:
-            //      - Skip the sensor response (80 µs low + 80 µs high)
-            //      - For each of 40 bits: low duration ~50 µs (fixed),
-            //        high duration determines bit value (≈27 µs = 0, ≈70 µs = 1)
-            //   3. Assemble 5 bytes: RH_high, RH_low, T_high, T_low, checksum
-            //   4. Verify checksum = (RH_high + RH_low + T_high + T_low) & 0xFF
-            //   5. Negative temperature: T_high & 0x80 → sign bit
-            //   6. Range check (DHT22_TEMP_MIN_CC .. DHT22_TEMP_MAX_CC,
-            //      DHT22_HUMID_MIN_PM .. DHT22_HUMID_MAX_PM)
-            //   7. On success: build env_sensor_data_t with valid=true and
-            //      invoke s_callback(&sample). Reset consecutive_failures=0.
-            //   8. On any failure (checksum, range, parse): increment
-            //      consecutive_failures; if ≥ ENV_FAIL_THRESHOLD →
-            //      emit placeholder with valid=false so the state machine
-            //      can mark env_sensor_online=false (state-model.md §5.2).
-            ESP_LOGD(TAG, "RMT RX done: %u symbols (parser TODO)", (unsigned)num);
-            emit_placeholder(timestamp_ms);
-            consecutive_failures++;
+            // DHT22 parser.
+            env_sensor_data_t sample = {
+                .timestamp_ms    = timestamp_ms,
+                .temperature_cc  = 0,
+                .humidity_permil = 0,
+                .co2_ppm         = 0,
+                .valid           = false,
+                .failure         = ENV_SENSOR_FAIL_PROTOCOL,
+            };
+            sample.failure = parse_rmt_dht22(s_rx_buf, num, &sample);
+
+            if (sample.failure == ENV_SENSOR_OK) {
+                consecutive_failures = 0;
+                s_diag_printed = false;
+                ESP_LOGI(TAG, "DHT22: temp=%d cc, humid=%u permil",
+                         (int)sample.temperature_cc,
+                         (unsigned)sample.humidity_permil);
+            } else {
+                // One-shot diagnostic on first failure.
+                if (!s_diag_printed) {
+                    s_diag_printed = true;
+                    const size_t dump_n = (num > 42) ? 42 : num;
+                    ESP_LOGW(TAG, "DHT22 parse fail: num=%u symbols, "
+                             "dump=%u symbols follow",
+                             (unsigned)num, (unsigned)dump_n);
+                    for (size_t i = 0; i < dump_n; i++) {
+                        ESP_LOGI(TAG, "  [%2u] l0=%u d0=%4u  l1=%u d1=%4u",
+                                 (unsigned)i,
+                                 (unsigned)s_rx_buf[i].level0,
+                                 (unsigned)s_rx_buf[i].duration0,
+                                 (unsigned)s_rx_buf[i].level1,
+                                 (unsigned)s_rx_buf[i].duration1);
+                    }
+                }
+                consecutive_failures++;
+                if (consecutive_failures == ENV_FAIL_THRESHOLD) {
+                    ESP_LOGW(TAG, "DHT22 %u consecutive parse failures (driver threshold)",
+                             ENV_FAIL_THRESHOLD);
+                }
+            }
+            if (s_callback) {
+                s_callback(&sample);
+            }
+            s_armed_txn = 0;   // transaction complete — ISR must ignore stale callbacks
         } else {
+            // Timeout: clear arm flag so any late ISR ignores the callback
+            s_armed_txn = 0;
             // RMT did not complete within 100 ms → sensor not responding.
             // Disable the channel to terminate the in-progress receive and
             // prevent a late ISR from corrupting the next transaction.
             ESP_LOGW(TAG, "DHT22 no response within %u ms; disabling RX",
                      ENV_RMT_TIMEOUT_MS);
-            rmt_disable(s_rmt_rx_chan);
-            emit_placeholder(timestamp_ms);
+            // rmt_disable() transitions fsm RUN→INIT, terminating the
+            // in-progress receive. Then rmt_enable() transitions fsm
+            // INIT→ENABLE so the next rmt_receive() succeeds. Without
+            // rmt_enable(), every subsequent rmt_receive() returns
+            // ESP_ERR_INVALID_STATE (see FSM note in step 6 above).
+            esp_err_t dis_ret = rmt_disable(s_rmt_rx_chan);
+            if (dis_ret != ESP_OK) {
+                ESP_LOGE(TAG, "rmt_disable after timeout: %s",
+                         esp_err_to_name(dis_ret));
+            }
+            esp_err_t en_ret = rmt_enable(s_rmt_rx_chan);
+            if (en_ret != ESP_OK) {
+                ESP_LOGE(TAG, "rmt_enable after timeout recovery: %s",
+                         esp_err_to_name(en_ret));
+            }
+            emit_failure(timestamp_ms, ENV_SENSOR_FAIL_TIMEOUT);
             consecutive_failures++;
         }
 
-feed_wdt:
+        feed_wdt:
 
         if (consecutive_failures >= ENV_FAIL_THRESHOLD) {
-            // state-model.md §5.2: 3 consecutive failures → sensor offline.
-            // The state machine infers this from valid=false samples; no
-            // separate "offline" event is sent.
-            ESP_LOGW(TAG, "DHT22 consecutive failures=%" PRIu32 " (≥ %u → offline)",
-                     consecutive_failures, ENV_FAIL_THRESHOLD);
+            // Log once per offline episode, then suppress until recovery.
+            // The state machine (process_env) owns online/offline state.
+            if (!s_threshold_logged) {
+                s_threshold_logged = true;
+                ESP_LOGW(TAG, "DHT22 consecutive failures=%" PRIu32 " (≥ %u)",
+                         consecutive_failures, ENV_FAIL_THRESHOLD);
+            }
+        } else {
+            s_threshold_logged = false;
         }
 
         // Feed TWDT after each sample attempt. Max gap since previous feed =

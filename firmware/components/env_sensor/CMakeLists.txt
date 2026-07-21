@@ -7,6 +7,7 @@
 idf_component_register(
     SRCS
         "env_sensor.c"
+        "env_sensor_parser.c"
     INCLUDE_DIRS
         "include"
     REQUIRES

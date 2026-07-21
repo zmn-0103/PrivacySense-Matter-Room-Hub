@@ -31,6 +31,16 @@
 extern "C" {
 #endif
 
+// Failure reason when valid=false.  The state machine uses this to decide
+// the offline threshold (3 consecutive protocol/timeout failures vs 5
+// consecutive out-of-range samples per state-model.md §5.2).
+typedef enum {
+    ENV_SENSOR_OK          = 0,   // valid=true, no failure
+    ENV_SENSOR_FAIL_TIMEOUT,      // RMT no response (sensor absent / disconnected)
+    ENV_SENSOR_FAIL_PROTOCOL,     // checksum / parse error / insufficient symbols
+    ENV_SENSOR_FAIL_RANGE,        // value out of valid range (temp or humidity)
+} env_sensor_failure_t;
+
 // MUST match main/state_machine.h::env_sensor_data_t exactly.
 // `co2_ppm` is always 0 in v1 (SCD40 not populated); kept in the struct so
 // later revisions can fill it without breaking the state-machine ABI.
@@ -40,6 +50,7 @@ typedef struct {
     uint16_t humidity_permil;    // per-mille (0..1000, e.g. 543 = 54.3 %RH)
     uint16_t co2_ppm;            // 0 in v1 (SCD40 not populated)
     bool     valid;
+    env_sensor_failure_t failure;  // reason when valid=false
 } env_sensor_data_t;
 
 // Data callback. Invoked on sensor_env_task context for every sample attempt:
