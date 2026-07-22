@@ -73,10 +73,19 @@ typedef struct {
 // --- Matter commissioning lifecycle events (produced by matter_app.cpp) ---
 typedef enum {
     MATTER_LIFECYCLE_COMMISSIONING_COMPLETE = 0,  // Fabric established, device commissioned
+    MATTER_LIFECYCLE_WINDOW_OPENED,                // Commissioning window opened, BLE advertising
     MATTER_LIFECYCLE_WINDOW_CLOSED,                // Commissioning window timed out (5 min)
     MATTER_LIFECYCLE_FABRIC_REMOVED,              // At least one fabric removed (may NOT be factory reset)
     MATTER_LIFECYCLE_SESSION_STOPPED,             // PASE session ended (without completing)
 } matter_lifecycle_event_t;
+
+// Carries both the event type and, for FABRIC_REMOVED, the number of
+// fabrics remaining AFTER the removal. remaining_fabrics is 0 for all
+// other event types and MUST be ignored by the consumer.
+typedef struct {
+    matter_lifecycle_event_t event;
+    uint8_t                  remaining_fabrics;
+} matter_lifecycle_t;
 
 // --- Unified event payload ---
 typedef struct {
@@ -87,7 +96,7 @@ typedef struct {
         button_event_t       button;
         network_status_t     network;
         matter_command_t     matter_cmd;
-        matter_lifecycle_event_t matter_lifecycle;
+        matter_lifecycle_t   matter_lifecycle;
     } data;
     uint32_t timestamp_ms;
 } app_event_t;

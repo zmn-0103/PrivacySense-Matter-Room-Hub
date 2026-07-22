@@ -588,17 +588,18 @@ static void process_network(network_status_t status)
     }
 }
 
-// Phase 3 Step 3: Matter commissioning lifecycle handler.
+// Phase 3 Step 3/5: Matter commissioning lifecycle handler.
 // Receives EVENT_MATTER_LIFECYCLE from matter_app.cpp callbacks and updates
 // matter_commissioned / commissioning_active in room_state.
 //
 // Commissioning lifecycle (commissioning-lifecycle.md §3.2):
-//   WindowOpened → SessionStarted → (PAKE exchange) →
-//     ┌─ CommissioningComplete (fabric established) → matter_commissioned = true
+//   WindowOpened → commissioning_active = true
+//   SessionStarted → (PAKE exchange)
+//     ┌─ CommissioningComplete → matter_commissioned = true, commissioning_active = false
 //     └─ SessionStopped (no fabric) → no change
-//   WindowClosed (5 min timeout, no controller connected) → commissioning_active = false
-//   FabricRemoved → matter_commissioned = false
-static void process_matter_lifecycle(matter_lifecycle_event_t event)
+//   WindowClosed (5 min timeout) → commissioning_active = false
+//   FabricRemoved → check remaining_fabrics; only clear matter_commissioned if 0
+static void process_matter_lifecycle(const matter_lifecycle_t *lifecycle)
 {
     room_state_t st;
     if (room_state_snapshot(&st) != ESP_OK) {
@@ -606,11 +607,16 @@ static void process_matter_lifecycle(matter_lifecycle_event_t event)
         return;
     }
 
-    switch (event) {
+    switch (lifecycle->event) {
     case MATTER_LIFECYCLE_COMMISSIONING_COMPLETE:
         st.matter_commissioned = true;
         st.commissioning_active = false;
         ESP_LOGI(TAG, "matter: commissioning complete — fabric established");
+        break;
+
+    case MATTER_LIFECYCLE_WINDOW_OPENED:
+        st.commissioning_active = true;
+        ESP_LOGI(TAG, "matter: commissioning window opened (BLE advertising)");
         break;
 
     case MATTER_LIFECYCLE_WINDOW_CLOSED:
@@ -619,9 +625,19 @@ static void process_matter_lifecycle(matter_lifecycle_event_t event)
         break;
 
     case MATTER_LIFECYCLE_FABRIC_REMOVED:
-        st.matter_commissioned = false;
-        ESP_LOGI(TAG, "matter: fabric removed — matter_commissioned cleared "
-                 "(re-commissioning may be needed)");
+        // Phase 3 Step 5: only clear matter_commissioned when ALL fabrics
+        // are gone. In multi-admin scenarios with multiple fabrics, losing
+        // one fabric does not decommission the device.
+        if (lifecycle->remaining_fabrics == 0) {
+            st.matter_commissioned = false;
+            ESP_LOGI(TAG, "matter: last fabric removed — matter_commissioned cleared "
+                     "(re-commissioning needed)");
+        } else {
+            ESP_LOGI(TAG, "matter: fabric removed, %u fabric(s) remain — "
+                     "matter_commissioned unchanged",
+                     (unsigned)lifecycle->remaining_fabrics);
+            return;  // no room_state change needed
+        }
         break;
 
     case MATTER_LIFECYCLE_SESSION_STOPPED:
@@ -750,7 +766,7 @@ void state_machine_task(void *pvParameters)
                 process_matter_command(&ev.data.matter_cmd);
                 break;
             case EVENT_MATTER_LIFECYCLE:
-                process_matter_lifecycle(ev.data.matter_lifecycle);
+                process_matter_lifecycle(&ev.data.matter_lifecycle);
                 break;
             case EVENT_MATTER_READ:
             case EVENT_TIMER_1S:

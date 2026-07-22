@@ -207,12 +207,15 @@ Wi-Fi 重连成功后按以下顺序恢复：
 | 风险 | 说明 | 影响范围 | 跟踪 |
 |------|------|----------|------|
 | **实机 BLE commissioning 未验证** | Phase 3 Step 2 的 BLE commissioning 闭环仅在代码 + 编译层面验证通过，未在真实 ESP32-C6 硬件上使用 Matter Controller（chip-tool / ESP Matter Controller app）完成完整的 BLE pairing → PASE → NOC → Wi-Fi 凭据注入 → CASE 会话建立流程。Step 1 的 chip-tool 配网日志显示设备在 `FindOperationalForStayActive` 步骤失败（CHIP Error 0x00000046: No endpoint），Wi-Fi 凭据虽已写入但设备在 Wi-Fi 网络上的操作可达性未确认。 | BLE commissioning 闭环可能在实际硬件上存在 mDNS / IPv6 / Wi-Fi 切换时序问题。 | 待 Phase 3 Step 7（端到端验证）覆盖 |
-| **Matter degraded 模式未实测** | `esp_matter::start()` 失败后部分 CHIP/NVS 状态无法完整回滚，当前靠 `s_node = nullptr` + 不 spawn `matter_adapter_task` 隔离。 | degraded 模式下 CHIP 内部状态可能残留，影响后续恢复。 | 待 Phase 3 Step 5（异常分支测试）覆盖 |
-| **多 fabric 场景未处理** | `kFabricRemoved` 回调直接将 `matter_commissioned` 设为 false，未检查剩余 fabric 数量。在 multi-admin 场景中，只移除一个 fabric 不应触发重新配网。 | 多 fabric 环境中误判配网状态。 | 待 Phase 3 Step 5 实现 fabric 计数 |
+| **Matter degraded 模式未实测** | `esp_matter::start()` 失败后部分 CHIP/NVS 状态无法完整回滚，当前靠 `s_node = nullptr` + 不 spawn `matter_adapter_task` 隔离。 | degraded 模式下 CHIP 内部状态可能残留，影响后续恢复。 | 待异常分支测试覆盖 |
+| **BLE 释放后不可恢复** | `esp_bt_mem_release(ESP_BT_MODE_BLE)` 在 `kCommissioningComplete` 时调用，释放 ~20-30 KB。释放后 BLE 不可再启用（需重启）。如果后续所有 fabric 被移除并需要重新配网，设备必须冷重启才能重新启用 BLE。 | 重新配网需要额外的重启步骤。 | 已知设计权衡；工厂复位已处理重启路径 |
+
+## 10. 版本与变更记录
 
 ## 10. 版本与变更记录
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| 0.3 | 2026-07-22 | Phase 3 Step 5：fabric 计数逻辑（移除"多 fabric 未处理"风险）；BLE 内存释放；commissioning window 打开跟踪 |
 | 0.2 | 2026-07-22 | 新增已知风险章节（实机 BLE commissioning 未验证等 3 项）；Phase 3 Step 3 完成后更新 |
 | 0.1 | 2026-07-11 | 初版：BLE commissioning、Wi-Fi 重连、恢复出厂、配置迁移、断电/watchdog 复位 |

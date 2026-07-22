@@ -58,14 +58,18 @@
 #include <esp_matter.h>
 #include <esp_matter_endpoint.h>
 
+#include "esp_bt.h"
 #include "esp_log.h"
 #include "esp_task_wdt.h"
 #include "esp_wifi.h"
+#include "esp_system.h"
 #include "nvs_flash.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
-#include "esp_system.h"
+
+#include <app/server/Server.h>
+#include <credentials/FabricTable.h>
 
 #include "state_machine.h"   // g_matter_report_queue, g_app_event_queue, matter_report_t, app_event_t
 
@@ -93,7 +97,7 @@ static node_t *s_node = nullptr;
 static void app_event_cb(const ChipDeviceEvent *event, intptr_t arg)
 {
     (void)arg;
-    matter_lifecycle_event_t lifecycle = MATTER_LIFECYCLE_SESSION_STOPPED;
+    matter_lifecycle_t lifecycle = { MATTER_LIFECYCLE_SESSION_STOPPED, 0 };
     bool send_lifecycle = false;
 
     switch (event->Type) {
@@ -111,35 +115,62 @@ static void app_event_cb(const ChipDeviceEvent *event, intptr_t arg)
 
     case DeviceEventType::kCommissioningSessionStopped:
         ESP_LOGI(TAG, "event: commissioning session stopped");
-        lifecycle = MATTER_LIFECYCLE_SESSION_STOPPED;
+        lifecycle.event = MATTER_LIFECYCLE_SESSION_STOPPED;
         send_lifecycle = true;
         break;
 
     case DeviceEventType::kCommissioningWindowOpened:
         ESP_LOGI(TAG, "event: commissioning window opened (BLE advertising)");
+        lifecycle.event = MATTER_LIFECYCLE_WINDOW_OPENED;
+        send_lifecycle = true;
         break;
 
     case DeviceEventType::kCommissioningWindowClosed:
         ESP_LOGI(TAG, "event: commissioning window closed");
-        lifecycle = MATTER_LIFECYCLE_WINDOW_CLOSED;
+        lifecycle.event = MATTER_LIFECYCLE_WINDOW_CLOSED;
         send_lifecycle = true;
         break;
 
     case DeviceEventType::kCommissioningComplete:
         ESP_LOGI(TAG, "event: commissioning complete (fabric established)");
-        lifecycle = MATTER_LIFECYCLE_COMMISSIONING_COMPLETE;
+        lifecycle.event = MATTER_LIFECYCLE_COMMISSIONING_COMPLETE;
         send_lifecycle = true;
+
+        // Phase 3 Step 5: release BLE memory after successful commissioning.
+        // Commissioning is complete, the device now operates over Wi-Fi, and
+        // BLE is no longer needed. Releasing ~20-30 KB back to the heap
+        // (commissioning-lifecycle.md §3.4).
+        {
+            esp_err_t bt_err = esp_bt_mem_release(ESP_BT_MODE_BLE);
+            if (bt_err != ESP_OK) {
+                ESP_LOGW(TAG, "esp_bt_mem_release(BLE): %s (non-fatal)",
+                         esp_err_to_name(bt_err));
+            } else {
+                ESP_LOGI(TAG, "BLE memory released (~20-30 KB)");
+            }
+        }
         break;
 
-    case DeviceEventType::kFabricRemoved:
-        // A fabric was removed, but this is NOT necessarily a factory reset.
-        // In multi-admin scenarios, only one of several fabrics may be gone.
-        // Phase 3 Step 5 should check remaining fabric count before deciding
-        // whether to re-open commissioning or clear business config.
-        ESP_LOGI(TAG, "event: fabric removed (check remaining fabric count)");
-        lifecycle = MATTER_LIFECYCLE_FABRIC_REMOVED;
+    case DeviceEventType::kFabricRemoved: {
+        // Phase 3 Step 5: check remaining fabric count before deciding
+        // whether to clear matter_commissioned. In multi-admin scenarios,
+        // only one of several fabrics may be removed — the device is still
+        // commissioned if at least one fabric remains.
+        ESP_LOGI(TAG, "event: fabric removed (checking remaining fabric count)");
+
+        uint8_t remaining = 0;
+        // FabricTable is safe to query here — we're on the CHIP task context
+        // and the fabric was already removed from the table.
+        auto &server = chip::Server::GetInstance();
+        auto &fabricTable = server.GetFabricTable();
+        remaining = fabricTable.FabricCount();
+        ESP_LOGI(TAG, "fabrics remaining after removal: %u", (unsigned)remaining);
+
+        lifecycle.event = MATTER_LIFECYCLE_FABRIC_REMOVED;
+        lifecycle.remaining_fabrics = remaining;
         send_lifecycle = true;
         break;
+    }
 
     default:
         break;
@@ -153,7 +184,7 @@ static void app_event_cb(const ChipDeviceEvent *event, intptr_t arg)
         };
         if (xQueueSend(g_app_event_queue, &ev, 0) != pdTRUE) {
             ESP_LOGW(TAG, "lifecycle event %d dropped (app_event_queue full)",
-                     (int)lifecycle);
+                     (int)lifecycle.event);
         }
     }
 }
