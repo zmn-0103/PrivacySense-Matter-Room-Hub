@@ -48,10 +48,14 @@ extern "C" {
 // and start esp_matter (spawns the internal CHIP task, initialises BLE
 // NimBLE, opens the commissioning window, begins advertising).
 //
-// Current contract (Phase 3 Step 2):
-//   - Creates EP0 (Root Node) only. EP1 (OccupancySensing) and EP2
-//     (ModeSelect) are NOT created yet — they arrive in Phase 4.
-//   - Returns ESP_OK on success, ESP_FAIL (or other non-OK) on failure.
+// Current contract (Phase 3 Step 6):
+//   - Creates EP0 (Root Node), EP1 (OccupancySensor, 0x0107), EP2
+//     (ModeSelect, 0x0027) with 3 supported modes (Normal/Quiet/Night).
+//   - app_attribute_update_cb routes ChangeToMode commands to
+//     state_machine_task via g_app_event_queue.
+//   - matter_adapter_task applies MATTER_REPORT_OCCUPANCY/CURRENT_MODE/
+//     FORCE_SYNC to EP1/EP2 attributes under the CHIP stack lock.
+//   - Returns ESP_OK on success, ESP_FAIL on failure.
 //   - Does NOT spawn matter_adapter_task — that is done by app_main so the
 //     task parameters live in one place.
 //   - Callers MUST NOT abort on failure — main.c enters a Matter-degraded
@@ -77,11 +81,10 @@ void matter_adapter_task(void *pvParameters);
 // CHIP stack task (e.g. via a queued item processed by matter_adapter_task),
 // not call into esp_matter from the state_machine_task context.
 //
-// Current contract (Phase 3 Step 2): returns ESP_ERR_NOT_SUPPORTED — EP2
-// ModeSelect does not exist yet, so there is no command to respond to.
-// Callers MUST log the drop and continue (the state machine must not block
-// on a Matter response that will never arrive). Returns ESP_OK once EP2 is
-// wired in Phase 4.
+// Current contract (Phase 3 Step 6): EP2 ModeSelect is now created, so
+// ChangeToMode is handled by the CHIP stack via app_attribute_update_cb.
+// state_machine_task processes the mode change asynchronously; this function
+// is retained for ABI compatibility and always returns ESP_OK.
 esp_err_t matter_app_respond_change_to_mode(void *cmd_ctx, bool success);
 
 // --- Factory reset (Phase 3 Step 4) ---

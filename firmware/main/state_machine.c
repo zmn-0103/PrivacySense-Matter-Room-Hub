@@ -654,7 +654,50 @@ static void process_matter_lifecycle(const matter_lifecycle_t *lifecycle)
 
 static void process_matter_command(const matter_command_t *cmd)
 {
-    (void)cmd;
+    if (cmd->type != MATTER_COMMAND_CHANGE_TO_MODE) {
+        ESP_LOGW(TAG, "unknown matter command type %d", (int)cmd->type);
+        return;
+    }
+
+    uint8_t new_mode = cmd->new_mode;
+    if (new_mode > 2) {
+        ESP_LOGW(TAG, "MATTER ChangeToMode: rejected invalid mode %u", (unsigned)new_mode);
+        return;
+    }
+
+    // Phase 3 Step 6: apply the mode change directly. A controller-initiated
+    // ChangeToMode overrides the current user_mode and resets quiet_active
+    // (the controller is authoritative for mode selection, unlike short-press
+    // toggles). pre_night_mode is preserved so NIGHT window auto-switch can
+    // restore it later.
+    room_state_t st;
+    if (room_state_snapshot(&st) != ESP_OK) {
+        ESP_LOGE(TAG, "MATTER ChangeToMode: snapshot failed");
+        return;
+    }
+
+    user_mode_t target = (user_mode_t)new_mode;
+    user_mode_t old_mode = st.user_mode;
+
+    st.user_mode    = target;
+    st.quiet_active = false;   // direct set, not a toggle
+
+    if (room_state_update(&st) != ESP_OK) {
+        ESP_LOGE(TAG, "MATTER ChangeToMode: update failed");
+        return;
+    }
+
+    ESP_LOGI(TAG, "MATTER ChangeToMode: %s → %s (controller)",
+             old_mode == MODE_NORMAL ? "NORMAL" :
+             old_mode == MODE_QUIET  ? "QUIET"  : "NIGHT",
+             target == MODE_NORMAL ? "NORMAL" :
+             target == MODE_QUIET  ? "QUIET"  : "NIGHT");
+
+    // Push report so matter_adapter_task syncs the CurrentMode attribute.
+    // The CHIP stack already accepted the write (app_attribute_update_cb
+    // returned ESP_OK), so this is a best-effort sync of the actual state.
+    (void)push_matter_report(MATTER_REPORT_CURRENT_MODE,
+                             st.occupancy, st.user_mode);
 }
 
 // Phase 2: NIGHT window evaluation via the pure-logic night_window_sm.
