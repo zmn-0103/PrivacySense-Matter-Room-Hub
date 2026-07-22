@@ -1,15 +1,13 @@
 // PrivacySense Matter Room Hub - matter_app.cpp
 //
-// Minimal Matter node + BLE commissioning (Phase 3 Step 2).
+// Matter node + BLE commissioning + EP1/EP2 endpoints (Phase 3 complete).
 //
-// This file replaces the previous matter_app.c STUB. It creates a minimal
-// Matter node with only Endpoint 0 (Root Node) and starts BLE commissioning
-// using the Test Commissionable Data Provider. Business endpoints (EP1
-// OccupancySensing, EP2 ModeSelect) and attribute sync arrive in Phase 4.
-//
-// Endpoint topology (current phase):
+// Creates a full Matter node with three endpoints:
 //   EP0 Root Node  (standard, created automatically by node::create())
-//   EP1/EP2        NOT created yet (Phase 4)
+//   EP1 Occupancy Sensor (0x0107) ← room_state.occupancy
+//   EP2 Mode Select (0x0027) ← room_state.user_mode
+//
+// No EP3 in v1. Env alert is LOCAL ONLY (matter-data-model.md §5).
 //
 // SECURITY: setup passcode / discriminator / SPAKE2+ verifier come from a
 // Commissionable Data Provider per commissioning-lifecycle.md §3.2 — they are

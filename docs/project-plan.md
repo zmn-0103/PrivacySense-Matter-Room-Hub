@@ -107,6 +107,17 @@
 
 完成条件：首次配网、重复配网、错误密码、路由器重启和设备重启均可复现并记录；SNTP/NIGHT 自动切换验证通过。
 
+> **阶段 3 实施进度（8 步开发顺序）**：
+> - Step 1 `ebcc38e`: network_reconnect_sm 状态机重构 + host 测试 ✅
+> - Step 2 `7c95a09`: 最小 BLE commissioning 闭环 + Reviewer 反馈修复 ✅
+> - Step 3 `372c759`: Matter 生命周期回调 → app_event_t 派发，wifi_connected/matter_commissioned 追踪 ✅
+> - Step 4 `613b9a7`: 长按工厂复位 + 防误触倒计时 + 绿/红 LED 反馈 ✅
+> - Step 5 `f08b40c`: BLE 资源释放、fabric 计数（FabricTable）、commissioning window 打开跟踪 ✅
+> - Step 6 `5aae27a`: EP1/EP2 端点创建 + Matter 属性上报 + ChangeToMode 命令处理 ✅
+> - Step 7: 文档更新与收尾 ✅
+> - 已知风险：实机 BLE commissioning 闭环未使用 chip-tool 在真实硬件验证（mDNS/操作发现未覆盖），见 commissioning-lifecycle.md §9
+> - 建时间：2026-07-21 → 2026-07-22
+
 > **阶段 2 遗留项归属说明**：T05（雷达断线）和 T16（按键模式切换）的 Matter 子项（occupancy 保留最后有效值、CurrentMode 读取）属于 Matter 数据模型范畴，移至阶段 4 实现和验证，不纳入阶段 3 范围。
 
 ### 阶段 4：Matter over Wi-Fi，4 到 7 天
@@ -120,6 +131,8 @@
 - **补充验证 T16 Matter 子项**：按键切换模式后 Matter `CurrentMode` 属性同步更新。
 
 完成条件：至少使用一个实际 Matter 控制器完成配网、状态读取和自动化联动，并保存演示记录。
+
+> **阶段 3 提前完成项**：EP1/EP2 端点和属性上报已在阶段 3 Step 6 实现（commit `5aae27a`）。断网保持 + 重连同步也已就绪（Step 3 `process_network` + FORCE_SYNC）。剩余：实机 chip-tool 配网验证。
 
 ### 阶段 5：可靠性与资源检查，3 到 5 天
 
