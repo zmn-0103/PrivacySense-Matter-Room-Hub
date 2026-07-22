@@ -44,16 +44,18 @@ extern "C" {
 #endif
 
 // --- Lifecycle ---
-// Initialise esp_matter node + EP0/EP1/EP2 endpoints, register attribute
-// update and command callbacks. Does NOT spawn matter_adapter_task — that
-// is done by app_main so the task parameters live in one place.
+// Initialise the Matter stack: create the minimal node (EP0 Root Node only)
+// and start esp_matter (spawns the internal CHIP task, initialises BLE
+// NimBLE, opens the commissioning window, begins advertising).
 //
-// STUB CONTRACT (current build): returns ESP_ERR_NOT_SUPPORTED — no node /
-// endpoint is created and no commissioning is started. Callers MUST treat
-// ESP_ERR_NOT_SUPPORTED as "Matter intentionally disabled, continue boot"
-// (see main.c) rather than aborting. Any other non-OK return is a real
-// failure. Will return ESP_OK once the matter-data-model.md §2 endpoints
-// are wired in a follow-up commit.
+// Current contract (Phase 3 Step 2):
+//   - Creates EP0 (Root Node) only. EP1 (OccupancySensing) and EP2
+//     (ModeSelect) are NOT created yet — they arrive in Phase 4.
+//   - Returns ESP_OK on success, ESP_FAIL (or other non-OK) on failure.
+//   - Does NOT spawn matter_adapter_task — that is done by app_main so the
+//     task parameters live in one place.
+//   - Callers MUST NOT abort on failure — main.c enters a Matter-degraded
+//     state (local sensors / state machine / UI continue without Matter).
 esp_err_t matter_app_init(void);
 
 // matter_adapter_task entry point. Created by app_main with stack 12288,
@@ -75,11 +77,11 @@ void matter_adapter_task(void *pvParameters);
 // CHIP stack task (e.g. via a queued item processed by matter_adapter_task),
 // not call into esp_matter from the state_machine_task context.
 //
-// STUB CONTRACT (current build): returns ESP_ERR_NOT_SUPPORTED — nothing is
-// queued and no response is sent to any controller. Callers MUST log the
-// drop and continue (the state machine must not block on a Matter response
-// that will never arrive). Will return ESP_OK once the endpoint tree from
-// matter-data-model.md §2 is wired.
+// Current contract (Phase 3 Step 2): returns ESP_ERR_NOT_SUPPORTED — EP2
+// ModeSelect does not exist yet, so there is no command to respond to.
+// Callers MUST log the drop and continue (the state machine must not block
+// on a Matter response that will never arrive). Returns ESP_OK once EP2 is
+// wired in Phase 4.
 esp_err_t matter_app_respond_change_to_mode(void *cmd_ctx, bool success);
 
 #ifdef __cplusplus

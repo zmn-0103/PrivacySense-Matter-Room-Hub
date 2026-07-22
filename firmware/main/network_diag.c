@@ -65,7 +65,7 @@ static int cmd_wifi_status(int argc, char **argv)
     network_diag_info_t d;
     network_get_diag_info(&d);
 
-    printf("=== Wi-Fi Status ===\n");
+    printf("=== Wi-Fi Status (observer mode) ===\n");
     printf("  state:                  %s (%d)\n", state_name(d.state), d.state);
     printf("  connected:              %s\n", network_is_connected() ? "yes" : "no");
     printf("  reconnect_attempts:     %u\n", (unsigned)d.reconnect_attempts);
@@ -73,49 +73,23 @@ static int cmd_wifi_status(int argc, char **argv)
     printf("  provisioned:            %s\n", d.provisioned ? "yes" : "no");
     printf("  timer_armed:            %s\n", d.timer_armed ? "yes" : "no");
     printf("  ingress_overruns:       %" PRIu32 "\n", d.ingress_overruns);
-    printf("  cred_write_retry:       %s\n", d.cred_write_retry_pending ? "pending" : "none");
-    printf("  wifi_start_retry:       %s\n", d.wifi_start_retry_pending ? "pending" : "none");
-    printf("  reconnect_deadline:     %s\n", d.reconnect_deadline_valid ? "armed" : "none");
-    printf("  cred_permanent_failure: %s\n", network_cred_write_permanent_failure() ? "yes" : "no");
+    printf("  cred_owner:             ESP-Matter (observer mode)\n");
     printf("  time_synced:            %s\n", network_time_is_synced() ? "yes" : "no");
-    printf("========================\n");
+    printf("=====================================\n");
     return 0;
 }
 
-// ── wifi_fault ─────────────────────────────────────────────────────────────
-static struct {
-    struct arg_str *type;
-    struct arg_end *end;
-} s_fault_args;
-
-static int cmd_wifi_fault(int argc, char **argv)
+// ── wifi_queue_storm ───────────────────────────────────────────────────────
+// Diagnostic-only: injects 40 DISCONNECTED commands directly into the ring to
+// exercise the spill-slot overload path. The reconfig_block / nvs_fail / clear
+// fault-injection sub-commands were removed in Phase 3 Step 2 when network.c
+// became a Wi-Fi observer (no local credential/retry state to fault).
+static int cmd_wifi_queue_storm(int argc, char **argv)
 {
-    int nerr = arg_parse(argc, argv, (void **)&s_fault_args);
-    if (nerr != 0) {
-        arg_print_errors(stderr, s_fault_args.end, argv[0]);
-        return 1;
-    }
-    const char *type = s_fault_args.type->sval[0];
-
-    if (strcmp(type, "reconfig_block") == 0) {
-        network_inject_fault(NET_FAULT_BLOCK_DISCONNECT_IN_RECONFIG);
-        printf("OK: RECONFIGURING disconnect block injected\n");
-        printf("  Next wifi_cred while CONNECTED will force RECONFIG_TIMEOUT path\n");
-    } else if (strcmp(type, "nvs_fail") == 0) {
-        network_inject_fault(NET_FAULT_NVS_WRITE_FAIL);
-        printf("OK: NVS write failure injected\n");
-        printf("  Next wifi_cred will trigger NVS write retry path\n");
-    } else if (strcmp(type, "clear") == 0) {
-        network_clear_all_faults();
-        printf("OK: all faults cleared\n");
-    } else if (strcmp(type, "queue_storm") == 0) {
-        printf("Injecting queue storm (40x DISCONNECTED directly into ring)...\n");
-        network_inject_queue_storm();
-        printf("Storm complete. Check ingress_overruns via wifi_status\n");
-    } else {
-        printf("UNKNOWN: valid types: reconfig_block, nvs_fail, queue_storm, clear\n");
-        return 1;
-    }
+    (void)argc; (void)argv;
+    printf("Injecting queue storm (40x DISCONNECTED directly into ring)...\n");
+    network_inject_queue_storm();
+    printf("Storm complete. Check ingress_overruns via wifi_status\n");
     return 0;
 }
 
@@ -126,9 +100,13 @@ void network_diag_register(void)
     s_cred_args.password = arg_str1(NULL, NULL, "<password>", "Wi-Fi password");
     s_cred_args.end     = arg_end(2);
 
+    // wifi_cred is a no-op in observer mode (ESP-Matter owns credentials).
+    // Retained so existing test scripts do not fail at registration; it will
+    // print FAIL: ESP_ERR_NOT_SUPPORTED when invoked.
     const esp_console_cmd_t cred_cmd = {
         .command = "wifi_cred",
-        .help = "Inject Wi-Fi credentials and connect: <ssid> <password>",
+        .help = "[observer-mode no-op] Credentials are owned by ESP-Matter; "
+                "use a Matter controller to commission. Kept for ABI compat.",
         .hint = NULL,
         .func = &cmd_wifi_cred,
         .argtable = &s_cred_args,
@@ -143,19 +121,15 @@ void network_diag_register(void)
     };
     ESP_ERROR_CHECK(esp_console_cmd_register(&status_cmd));
 
-    s_fault_args.type = arg_str1(NULL, NULL, "<type>", "reconfig_block, nvs_fail, queue_storm, clear");
-    s_fault_args.end  = arg_end(1);
-
-    const esp_console_cmd_t fault_cmd = {
-        .command = "wifi_fault",
-        .help = "Inject fault for acceptance testing: reconfig_block | nvs_fail | queue_storm | clear",
+    const esp_console_cmd_t storm_cmd = {
+        .command = "wifi_queue_storm",
+        .help = "Inject 40 DISCONNECTED cmds to exercise ring spill-slot overload path",
         .hint = NULL,
-        .func = &cmd_wifi_fault,
-        .argtable = &s_fault_args,
+        .func = &cmd_wifi_queue_storm,
     };
-    ESP_ERROR_CHECK(esp_console_cmd_register(&fault_cmd));
+    ESP_ERROR_CHECK(esp_console_cmd_register(&storm_cmd));
 
-    ESP_LOGI(TAG, "registered: wifi_cred, wifi_status, wifi_fault");
+    ESP_LOGI(TAG, "registered: wifi_cred (no-op), wifi_status, wifi_queue_storm");
 }
 
 #endif // CONFIG_NETWORK_DIAG_CONSOLE

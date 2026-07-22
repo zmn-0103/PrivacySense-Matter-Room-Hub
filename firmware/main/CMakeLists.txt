@@ -19,7 +19,7 @@ idf_component_register(
         "ui_rgb.c"
         "ssd1306.c"
         "network.c"
-        "matter_app.c"
+        "matter_app.cpp"
         "config.c"
         "radar_diag.c"
         "network_diag.c"

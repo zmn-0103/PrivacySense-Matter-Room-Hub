@@ -1,15 +1,18 @@
 // PrivacySense Matter Room Hub - network.h
 //
-// Wi-Fi Station management. Credentials are NOT compiled in — they are
-// injected at runtime via BLE commissioning (esp_matter Wi-Fi provisioning)
-// and stored in NVS by ESP-IDF Wi-Fi stack.
+// Wi-Fi Station observer (Phase 3 Step 2). ESP-Matter's ESPWiFiDriver is the
+// SOLE owner of Wi-Fi connection management (esp_wifi_set_config / connect /
+// disconnect) and credential storage. This module initialises the Wi-Fi stack
+// once at boot, subscribes to WIFI/IP events for state observation, publishes
+// NETWORK_STATUS to g_app_event_queue, and manages SNTP. It does NOT call
+// esp_wifi_set_config / connect / disconnect.
 //
 // Task profile (task-architecture.md §4.6):
 //   - Priority 4 (medium)
 //   - Stack   8192 B
 //   - Trigger event-driven (ESP-IDF Wi-Fi event loop)
 //
-// Disconnect / reconnect / backoff policy: see commissioning-lifecycle.md.
+// Observer-mode contract: see commissioning-lifecycle.md.
 
 #pragma once
 
@@ -27,8 +30,11 @@ esp_err_t network_init(void);
 // network_task entry point. Created by app_main with stack 8192, prio 4.
 void network_task(void *pvParameters);
 
-// Called by esp_matter Wi-Fi provisioning callback when credentials arrive.
-// Stores credentials via ESP-IDF Wi-Fi API (never logs the passphrase).
+// Observer-mode stub (Phase 3 Step 2). ESP-Matter's ESPWiFiDriver owns Wi-Fi
+// credential injection and NVS storage. This function is retained for ABI
+// compatibility with older callers (e.g. network_diag wifi_cred command) but
+// performs no work and always returns ESP_ERR_NOT_SUPPORTED. Use a Matter
+// controller to commission the device and deliver credentials.
 esp_err_t network_apply_provisioned_credentials(const char *ssid, const char *password);
 
 // Query current connection state. Reads from ESP-IDF event state.
@@ -40,13 +46,15 @@ bool network_is_connected(void);
 // reliable enough for NIGHT window auto-switch.
 bool network_time_is_synced(void);
 
-// Returns true if credential NVS write has permanently failed (max retries
-// exhausted). The Matter layer should check this and report provisioning
-// failure instead of treating it as success.
+// Observer-mode stub. Always returns false — ESP-Matter owns credential NVS
+// writes, so there is no local retry state to report. Kept for ABI
+// compatibility with the network_diag wifi_status command.
 bool network_cred_write_permanent_failure(void);
 
 #ifdef CONFIG_NETWORK_DIAG_CONSOLE
 // Diagnostic snapshot published by network_task under mutex protection.
+// Fields reflect observer-mode state only — credential/retry/deadline fields
+// were removed when network.c stopped owning Wi-Fi connection management.
 typedef struct {
     int              state;
     uint8_t          reconnect_attempts;
@@ -54,23 +62,12 @@ typedef struct {
     bool             provisioned;
     bool             timer_armed;
     uint32_t         ingress_overruns;
-    bool             cred_write_retry_pending;
-    bool             wifi_start_retry_pending;
-    bool             reconnect_deadline_valid;
 } network_diag_info_t;
 
 void network_get_diag_info(network_diag_info_t *info);
 
-// Fault injection.
-typedef enum {
-    NET_FAULT_NONE = 0,
-    NET_FAULT_BLOCK_DISCONNECT_IN_RECONFIG,
-    NET_FAULT_NVS_WRITE_FAIL,
-} net_fault_type_t;
-
-void network_inject_fault(net_fault_type_t fault);
-void network_clear_fault(net_fault_type_t fault);
-void network_clear_all_faults(void);
+// Diagnostic-only: injects 40 DISCONNECTED commands into the ring to exercise
+// the spill-slot overload path. No effect on the real Wi-Fi link.
 void network_inject_queue_storm(void);
 #endif // CONFIG_NETWORK_DIAG_CONSOLE
 

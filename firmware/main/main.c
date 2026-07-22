@@ -174,19 +174,16 @@ void app_main(void)
                                       env_data_handler));
 
     // Matter last — depends on Wi-Fi + NVS being ready.
-    // matter_app_init() currently returns ESP_ERR_NOT_SUPPORTED because the
-    // esp_matter node/endpoint creation is a follow-up TODO. Treat that
-    // specific code as "Matter intentionally stubbed, continue boot" and log
-    // it loudly so the operator knows Matter is offline in this build. Any
-    // OTHER error aborts via ESP_ERROR_CHECK.
-    {
-        esp_err_t mret = matter_app_init();
-        if (mret == ESP_ERR_NOT_SUPPORTED) {
-            ESP_LOGW(TAG, "matter_app_init: STUB return (Matter offline, "
-                     "boot continues; matter-data-model.md §2 TODO)");
-        } else {
-            ESP_ERROR_CHECK(mret);
-        }
+    // matter_app_init() creates the minimal Matter node (EP0 only) and starts
+    // BLE commissioning. Per AGENTS.md §3 ("网络或 Matter 异常时保留本地可用性"),
+    // a Matter init failure MUST NOT abort — the device enters a Matter-degraded
+    // state where sensors, state machine, network observer, and UI continue to
+    // run. matter_adapter_task is spawned only if init succeeded.
+    bool matter_ok = (matter_app_init() == ESP_OK);
+    if (!matter_ok) {
+        ESP_LOGE(TAG, "matter_app_init failed — entering Matter-degraded mode "
+                 "(sensors / state machine / UI continue; no Matter commissioning "
+                 "or attribute reporting until reboot)");
     }
 
     // --- Spawn application tasks ---
@@ -220,8 +217,16 @@ void app_main(void)
     }
     SPAWN_TASK("network",       network_task,
                TASK_NETWORK_STACK, TASK_NETWORK_PRIO);
-    SPAWN_TASK("matter_adapt",  matter_adapter_task,
-               TASK_MATTER_STACK, TASK_MATTER_PRIO);
+    // Spawn matter_adapter_task ONLY if matter_app_init succeeded. When Matter
+    // is degraded, g_matter_report_queue is still consumed by state_machine_task
+    // (it just never gets any reports to send); matter_adapter_task would have
+    // nothing to apply to the Matter stack anyway.
+    if (matter_ok) {
+        SPAWN_TASK("matter_adapt",  matter_adapter_task,
+                   TASK_MATTER_STACK, TASK_MATTER_PRIO);
+    } else {
+        ESP_LOGW(TAG, "skipping matter_adapt spawn (Matter degraded)");
+    }
     SPAWN_TASK("config",        config_task,
                TASK_CONFIG_STACK, TASK_CONFIG_PRIO);
 

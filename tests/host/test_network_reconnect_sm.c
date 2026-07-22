@@ -20,7 +20,7 @@
 //   T17  PROVISIONED during CONNECTED → force reconnect cycle
 //   T18  PROVISIONED during DISCONNECTED with timer_armed → STOP_TIMER issued
 //   T19  DISCONNECTED during STOPPED → ignored
-//   T20  GOT_IP during DISCONNECTED → ignored (stale, never issued connect)
+//   T20  GOT_IP during DISCONNECTED → CONNECTED (ESP-Matter owns connect)
 //   T21  TIMER_FIRED during CONNECTING → ignored (stale, timer_armed cleared)
 //   T22  TIMER_FIRED during STOPPED → ignored (stale, timer_armed cleared)
 //   T23  auth_fail then non-auth disconnect keeps auth_fail_attempts
@@ -423,18 +423,20 @@ static void test_disconnect_during_stopped_ignored(void)
 }
 
 // ── T20 ──
-static void test_got_ip_during_disconnected_ignored(void)
+static void test_got_ip_during_disconnected_connects(void)
 {
-    TEST("T20: GOT_IP during DISCONNECTED → ignored (stale)");
+    TEST("T20: GOT_IP during DISCONNECTED → CONNECTED (ESP-Matter owns connect)");
     net_sm_t sm;
     net_sm_init(&sm, true);
     net_sm_action_t a;
     net_sm_step(&sm, &EV_STA_START(true), &a);
     net_sm_step(&sm, &EV_DISCONNECT(REASON_NO_AP_FOUND), &a);  // → DISCONNECTED
     bool changed = net_sm_step(&sm, &EV_SIMPLE(NET_SM_EVENT_GOT_IP), &a);
-    if (changed)                                  { FAIL("should not change state"); return; }
-    if (a.flags != 0)                             { FAIL("should issue no actions"); return; }
-    if (sm.state != NET_SM_STATE_DISCONNECTED)    { FAIL("should stay DISCONNECTED"); return; }
+    if (!changed)                                   { FAIL("expected state change"); return; }
+    if (sm.state != NET_SM_STATE_CONNECTED)         { FAIL("should be CONNECTED"); return; }
+    if (!(a.flags & NET_SM_ACT_NOTIFY_STATUS))      { FAIL("missing NOTIFY_STATUS"); return; }
+    if (a.notify_status != NET_SM_STATUS_CONNECTED) { FAIL("wrong status"); return; }
+    if (sm.reconnect_attempts != 0)                 { FAIL("reconnect_attempts not reset"); return; }
     PASS();
 }
 
@@ -714,9 +716,9 @@ static void test_provisioned_during_disconnected_no_reconfiguring(void)
 }
 
 // ── T35 ──
-static void test_got_ip_in_reconfiguring_ignored(void)
+static void test_got_ip_in_reconfiguring_connects(void)
 {
-    TEST("T35: GOT_IP during RECONFIGURING → ignored (stale)");
+    TEST("T35: GOT_IP during RECONFIGURING → CONNECTED (ESP-Matter owns connect)");
     net_sm_t sm;
     net_sm_init(&sm, true);
     net_sm_action_t a;
@@ -725,9 +727,10 @@ static void test_got_ip_in_reconfiguring_ignored(void)
     if (sm.state != NET_SM_STATE_RECONFIGURING) { FAIL("precondition"); return; }
 
     bool changed = net_sm_step(&sm, &EV_SIMPLE(NET_SM_EVENT_GOT_IP), &a);
-    if (changed)                                   { FAIL("should not change state"); return; }
-    if (a.flags != 0)                              { FAIL("should issue no actions"); return; }
-    if (sm.state != NET_SM_STATE_RECONFIGURING)   { FAIL("should stay RECONFIGURING"); return; }
+    if (!changed)                                   { FAIL("expected state change"); return; }
+    if (sm.state != NET_SM_STATE_CONNECTED)         { FAIL("should be CONNECTED"); return; }
+    if (!(a.flags & NET_SM_ACT_NOTIFY_STATUS))      { FAIL("missing NOTIFY_STATUS"); return; }
+    if (a.notify_status != NET_SM_STATUS_CONNECTED) { FAIL("wrong status"); return; }
     PASS();
 }
 
@@ -772,7 +775,7 @@ int main(void)
     test_provisioned_during_connected_enters_reconfiguring();
     test_provisioned_during_disconnected_cancels_timer();
     test_disconnect_during_stopped_ignored();
-    test_got_ip_during_disconnected_ignored();
+    test_got_ip_during_disconnected_connects();
     test_timer_fired_during_connecting_ignored();
     test_timer_fired_during_stopped_ignored();
     test_auth_fail_then_non_auth_keeps_auth_count();
@@ -787,7 +790,7 @@ int main(void)
     test_action_fail_wifi_disconnect_skips_to_connect();
     test_first_commissioning_no_self_disconnect();
     test_provisioned_during_disconnected_no_reconfiguring();
-    test_got_ip_in_reconfiguring_ignored();
+    test_got_ip_in_reconfiguring_connects();
     test_reconfiguring_stale_timer_fired_ignored();
 
     printf("\n---\n");

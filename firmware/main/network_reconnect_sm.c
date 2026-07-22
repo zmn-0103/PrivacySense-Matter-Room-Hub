@@ -84,11 +84,14 @@ bool net_sm_step(net_sm_t *sm, const net_sm_event_t *ev,
     }
 
     case NET_SM_EVENT_GOT_IP: {
-        if (sm->state == NET_SM_STATE_DISCONNECTED ||
-            sm->state == NET_SM_STATE_STOPPED ||
-            sm->state == NET_SM_STATE_RECONFIGURING) {
-            return false;
-        }
+        // GOT_IP always means the link is up — transition to CONNECTED
+        // regardless of the previous state. This is critical when ESP-Matter
+        // is the sole Wi-Fi owner: it connects / reconnects independently
+        // (via ESPWiFiDriver or ESP-IDF auto-connect) while the local SM may
+        // be in DISCONNECTED, STOPPED, or RECONFIGURING state. The previous
+        // state gate caused s_connected_atomic and room_state.wifi_connected
+        // to never update after ESP-Matter-initiated reconnects (Reviewer AI,
+        // Phase 3 Step 2).
         sm->state               = NET_SM_STATE_CONNECTED;
         sm->reconnect_attempts  = 0;
         sm->auth_fail_attempts  = 0;

@@ -16,8 +16,12 @@
 //
 //   RECONFIGURING: waiting for self-induced DISCONNECTED before WIFI_CONNECT.
 //   - DISCONNECTED → CONNECTING + WIFI_CONNECT
-//   - GOT_IP → ignored (stale)
+//   - GOT_IP → CONNECTED (ESP-Matter owns connect; local SM tracks state)
 //   - Timeout: caller checks elapsed time, not SM-internal timer.
+//
+// Note (Phase 3 Step 2): ESP-Matter's ESPWiFiDriver is the sole Wi-Fi owner.
+// GOT_IP always transitions to CONNECTED regardless of previous state, so
+// the local SM stays in sync with ESP-Matter-initiated connect/reconnect.
 //
 // Action failure: NET_SM_EVENT_ACTION_FAILED with fail_type.
 // START_TIMER failure clears timer_armed AND sets timer_arm_pending so the
