@@ -95,6 +95,12 @@ typedef struct {
 esp_err_t config_init(void);          // Load from NVS or apply defaults
 esp_err_t config_get(ps_config_t *out);
 
+// Erase the business config namespace from the ps_cfg partition and write
+// default values. Called synchronously during factory reset — the device is
+// about to reboot, so this MUST NOT be an async queue operation. After this
+// returns ESP_OK, the ps_cfg partition is back to factory defaults.
+esp_err_t config_factory_reset(void);
+
 // Enqueue a full config update. Returns:
 //   ESP_OK            — update enqueued, will be applied + persisted by config_task
 //   ESP_ERR_INVALID_ARG — new_cfg == NULL

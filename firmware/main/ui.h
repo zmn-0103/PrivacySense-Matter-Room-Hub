@@ -53,6 +53,18 @@ void ui_task(void *pvParameters);
 #define UI_LONG_PRESS_COMMITTED  255U
 void ui_set_long_press_countdown(uint8_t remaining_seconds);
 
+// Phase 3 Step 4: show green LED for factory reset confirmation.
+// Called by state_machine_task before invoking matter_app_factory_reset().
+// The LED stays green until the system reboots (~1 s later). If UI is
+// degraded (ui_init failed), this is a safe no-op.
+void ui_show_factory_reset_confirm(void);
+
+// Phase 3 Step 4: show red LED on factory reset failure.
+// Called by state_machine_task if config_factory_reset() fails.
+// The LED stays red until the next state change; the system does NOT reboot.
+// If UI is degraded, this is a safe no-op.
+void ui_show_factory_reset_failed(void);
+
 // ── OLED display ─────────────────────────────────────────────────────
 // Called from ui_task to render the current room state on the OLED.
 // No-op (returns ESP_OK) if OLED init failed or OLED is not populated.

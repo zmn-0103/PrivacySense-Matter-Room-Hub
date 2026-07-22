@@ -84,6 +84,18 @@ void matter_adapter_task(void *pvParameters);
 // wired in Phase 4.
 esp_err_t matter_app_respond_change_to_mode(void *cmd_ctx, bool success);
 
+// --- Factory reset (Phase 3 Step 4) ---
+// Scheduled by state_machine_task after a confirmed long-press.
+// Erases the default NVS partition (Wi-Fi/Matter/BLE credentials),
+// calls esp_wifi_restore() to clear Wi-Fi config, and reboots after
+// 1 s to allow the green LED confirmation to be visible.
+//
+// Caller MUST have already called config_factory_reset() to erase
+// the business config (ps_cfg partition) BEFORE calling this function.
+// After this function is called, the system WILL reboot — there is
+// no return path for error handling after the reboot is scheduled.
+void matter_app_factory_reset(void);
+
 #ifdef __cplusplus
 }
 #endif

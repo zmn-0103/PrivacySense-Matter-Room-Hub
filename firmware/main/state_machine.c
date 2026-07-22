@@ -17,6 +17,7 @@
 #include "night_window_sm.h"
 #include "occ_sm.h"
 #include "room_state.h"
+#include "ui.h"
 
 static const char *TAG = "state_machine";
 
@@ -475,11 +476,36 @@ static void process_env(const env_sensor_data_t *data)
 static void process_button(button_event_t event)
 {
     if (event == BUTTON_EVENT_LONG_PRESS) {
-        // Phase-1: factory reset depends on Matter/config reset (not yet
-        // implemented). Log explicitly so there is no ambiguity.
-        ESP_LOGW(TAG, "LONG_PRESS: factory reset DEFERRED"
-                 " (NOT performed — config/Matter reset pending)");
-        // No matter report: no state change to report (deferred action).
+        // Phase 3 Step 4: factory reset on confirmed long-press (≥ 5 s).
+        // Commissioning-lifecycle.md §5: erase business config (ps_cfg
+        // partition) first, then erase default NVS (Wi-Fi/Matter/BLE
+        // credentials), green LED confirmation, reboot.
+        //
+        // Anti-mistouch is already enforced by button_task: the LONG_PRESS
+        // event is only emitted after the user holds the button for ≥ 5 s
+        // AND releases it. The 5 s red countdown UI provides real-time
+        // feedback. Release before 5 s cancels the operation.
+        ESP_LOGW(TAG, "LONG_PRESS: factory reset confirmed by user");
+        ESP_LOGW(TAG, "=== FACTORY RESET SEQUENCE START ===");
+
+        // Step 1: erase business config (ps_cfg partition → defaults).
+        esp_err_t ret = config_factory_reset();
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "FACTORY RESET FAILED at step 1 (config_factory_reset: %s) — "
+                     "ps_cfg partition NOT erased; aborting reset",
+                     esp_err_to_name(ret));
+            ui_show_factory_reset_failed();
+            return;
+        }
+
+        // Step 2: green LED confirmation, then system-level factory reset.
+        // matter_app_factory_reset() erases the default NVS partition
+        // (Wi-Fi/Matter/BLE credentials), restores Wi-Fi config, and
+        // reboots. It does NOT return.
+        ui_show_factory_reset_confirm();
+        ESP_LOGI(TAG, "business config erased; proceeding to system reset...");
+        matter_app_factory_reset();
+        // Unreachable — matter_app_factory_reset calls esp_restart().
         return;
     }
 

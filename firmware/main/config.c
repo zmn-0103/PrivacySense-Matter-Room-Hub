@@ -148,6 +148,55 @@ esp_err_t config_init(void)
     return ESP_OK;
 }
 
+// Synchronous factory reset of the business config partition (Phase 3 Step 4).
+// Erases the config namespace in ps_cfg, then writes default values so the
+// partition is clean AND valid on the next boot. Called by state_machine_task
+// during long-press factory reset — the device is about to reboot, so this
+// MUST complete before NVS is fully erased by matter_app_factory_reset().
+//
+// Returns:
+//   ESP_OK                  — erase + defaults written
+//   ESP_ERR_NVS_... / ESP_FAIL — erase or write failed; caller MUST log and
+//                                 may choose to proceed with system reset anyway
+esp_err_t config_factory_reset(void)
+{
+    ESP_LOGI(TAG, "factory reset: erasing ps_cfg partition...");
+
+    // Deinit the partition first (nvs_flash_erase_partition requires it).
+    esp_err_t ret = nvs_flash_deinit_partition(CONFIG_NVS_PARTITION);
+    if (ret != ESP_OK && ret != ESP_ERR_NVS_NOT_INITIALIZED) {
+        ESP_LOGE(TAG, "nvs_flash_deinit_partition(ps_cfg): %s",
+                 esp_err_to_name(ret));
+        return ret;
+    }
+
+    ret = nvs_flash_erase_partition(CONFIG_NVS_PARTITION);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "nvs_flash_erase_partition(ps_cfg): %s",
+                 esp_err_to_name(ret));
+        return ret;
+    }
+
+    // Re-initialise the partition so we can write defaults.
+    ret = nvs_flash_init_partition(CONFIG_NVS_PARTITION);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "nvs_flash_init_partition(ps_cfg) after erase: %s",
+                 esp_err_to_name(ret));
+        return ret;
+    }
+
+    // Write default config so the next boot doesn't see an empty namespace.
+    esp_err_t perr = persist_candidate_to_nvs(&s_default_cfg);
+    if (perr != ESP_OK) {
+        ESP_LOGE(TAG, "factory reset: writing defaults to ps_cfg failed: %s",
+                 esp_err_to_name(perr));
+        return perr;
+    }
+
+    ESP_LOGI(TAG, "factory reset: ps_cfg partition erased, defaults written");
+    return ESP_OK;
+}
+
 esp_err_t config_get(ps_config_t *out)
 {
     if (out == NULL || s_cfg_mutex == NULL) {

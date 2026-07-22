@@ -60,11 +60,14 @@
 
 #include "esp_log.h"
 #include "esp_task_wdt.h"
+#include "esp_wifi.h"
+#include "nvs_flash.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
+#include "esp_system.h"
 
-#include "state_machine.h"   // g_matter_report_queue, matter_report_t
+#include "state_machine.h"   // g_matter_report_queue, g_app_event_queue, matter_report_t, app_event_t
 
 using namespace esp_matter;
 using namespace chip::DeviceLayer;
@@ -294,4 +297,51 @@ void matter_adapter_task(void *pvParameters)
 
         ESP_ERROR_CHECK(esp_task_wdt_reset());
     }
+}
+
+// --- Factory reset (Phase 3 Step 4) ---
+// Commissioning-lifecycle.md §5: full factory reset triggered by confirmed
+// long-press (5 s). Erases the default NVS partition (Wi-Fi/Matter/BLE
+// credentials), calls esp_wifi_restore() to clear Wi-Fi config from the
+// PHY, and reboots. The caller MUST have already called
+// config_factory_reset() to erase the business config (ps_cfg partition)
+// BEFORE calling this function.
+//
+// After the default NVS erase, the device has no Wi-Fi credentials, no
+// Matter fabric, and no BLE commissioning state. On the next boot it will
+// enter fresh BLE commissioning mode (commissioning-lifecycle.md §3.1).
+//
+// SECURITY: this function does NOT log or persist any credentials. All
+// sensitive data is erased by nvs_flash_erase().
+void matter_app_factory_reset(void)
+{
+    ESP_LOGI(TAG, "=== FACTORY RESET: erasing default NVS partition ===");
+
+    esp_err_t ret = nvs_flash_deinit();
+    if (ret != ESP_OK && ret != ESP_ERR_NVS_NOT_INITIALIZED) {
+        ESP_LOGE(TAG, "nvs_flash_deinit: %s — proceeding with erase anyway",
+                 esp_err_to_name(ret));
+    }
+
+    ret = nvs_flash_erase();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "nvs_flash_erase: %s — NVS may not be fully erased, "
+                 "but proceeding with reboot", esp_err_to_name(ret));
+    } else {
+        ESP_LOGI(TAG, "default NVS partition erased (Wi-Fi/Matter/BLE "
+                 "credentials cleared)");
+    }
+
+    // Clear Wi-Fi configuration from the PHY. This ensures the radio
+    // does not try to auto-connect with stale credentials on next boot.
+    esp_wifi_restore();
+    ESP_LOGI(TAG, "Wi-Fi config restored to factory defaults");
+
+    // Short delay so the green LED confirmation is visible (commissioning-
+    // lifecycle.md §5.2 step 4: "绿色常亮 1 s → 系统重启"). The LED was
+    // set by the caller (state_machine_task) before invoking this function.
+    vTaskDelay(pdMS_TO_TICKS(1000));
+
+    ESP_LOGI(TAG, "rebooting...");
+    esp_restart();
 }

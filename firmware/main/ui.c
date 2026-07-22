@@ -250,6 +250,30 @@ void ui_set_long_press_countdown(uint8_t remaining_seconds)
     xQueueOverwrite(s_long_press_queue, &remaining_seconds);
 }
 
+// Direct LED override for factory reset confirmation. Called synchronously
+// from state_machine_task — the system is about to reboot, so we bypass the
+// normal ui_task rendering pipeline and set the LED directly.
+// If UI is degraded, this is a safe no-op (ESP_LOGW once per call).
+void ui_show_factory_reset_confirm(void)
+{
+    if (s_strip == NULL) {
+        ESP_LOGW(TAG, "factory reset confirm: LED not available (UI degraded)");
+        return;
+    }
+    led_strip_set_pixel(s_strip, 0, 0, 32, 0);   // green, medium brightness
+    led_strip_refresh(s_strip);
+}
+
+void ui_show_factory_reset_failed(void)
+{
+    if (s_strip == NULL) {
+        ESP_LOGW(TAG, "factory reset failed: LED not available (UI degraded)");
+        return;
+    }
+    led_strip_set_pixel(s_strip, 0, 32, 0, 0);    // red, medium brightness
+    led_strip_refresh(s_strip);
+}
+
 static const char *rgb_priority_label(uint8_t prio, ui_rgb_pattern_t pattern)
 {
     if (pattern == RGB_PATTERN_UNKNOWN_AMBER) return "P8-unknown";
