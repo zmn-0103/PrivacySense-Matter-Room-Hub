@@ -42,6 +42,7 @@ typedef enum {
     EVENT_MATTER_READ,           // Matter 属性读取请求
     EVENT_CONFIG_CHANGE,         // 配置变更
     EVENT_TIMER_1S,              // 1 秒定时器超时
+    EVENT_MATTER_LIFECYCLE,      // Matter commissioning 生命周期事件
 } app_event_type_t;
 
 // --- Debounced button events (produced by button_task) ---
@@ -69,6 +70,14 @@ typedef struct {
     void                *resp_handle;     // Opaque handle for async response
 } matter_command_t;
 
+// --- Matter commissioning lifecycle events (produced by matter_app.cpp) ---
+typedef enum {
+    MATTER_LIFECYCLE_COMMISSIONING_COMPLETE = 0,  // Fabric established, device commissioned
+    MATTER_LIFECYCLE_WINDOW_CLOSED,                // Commissioning window timed out (5 min)
+    MATTER_LIFECYCLE_FABRIC_REMOVED,              // At least one fabric removed (may NOT be factory reset)
+    MATTER_LIFECYCLE_SESSION_STOPPED,             // PASE session ended (without completing)
+} matter_lifecycle_event_t;
+
 // --- Unified event payload ---
 typedef struct {
     app_event_type_t type;
@@ -78,6 +87,7 @@ typedef struct {
         button_event_t       button;
         network_status_t     network;
         matter_command_t     matter_cmd;
+        matter_lifecycle_event_t matter_lifecycle;
     } data;
     uint32_t timestamp_ms;
 } app_event_t;

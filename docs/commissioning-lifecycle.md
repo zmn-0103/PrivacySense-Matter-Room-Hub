@@ -202,8 +202,17 @@ Wi-Fi 重连成功后按以下顺序恢复：
 - 重启后在启动日志中标记 `reset_reason = TWDT`。
 - 连续 3 次 TWDT 复位 → 进入安全模式：只启动传感器和 RGB，不启动 Wi-Fi/Matter，RGB 黄色常亮，等待用户操作。
 
-## 9. 版本与变更记录
+## 9. 已知风险 / 未覆盖项
+
+| 风险 | 说明 | 影响范围 | 跟踪 |
+|------|------|----------|------|
+| **实机 BLE commissioning 未验证** | Phase 3 Step 2 的 BLE commissioning 闭环仅在代码 + 编译层面验证通过，未在真实 ESP32-C6 硬件上使用 Matter Controller（chip-tool / ESP Matter Controller app）完成完整的 BLE pairing → PASE → NOC → Wi-Fi 凭据注入 → CASE 会话建立流程。Step 1 的 chip-tool 配网日志显示设备在 `FindOperationalForStayActive` 步骤失败（CHIP Error 0x00000046: No endpoint），Wi-Fi 凭据虽已写入但设备在 Wi-Fi 网络上的操作可达性未确认。 | BLE commissioning 闭环可能在实际硬件上存在 mDNS / IPv6 / Wi-Fi 切换时序问题。 | 待 Phase 3 Step 7（端到端验证）覆盖 |
+| **Matter degraded 模式未实测** | `esp_matter::start()` 失败后部分 CHIP/NVS 状态无法完整回滚，当前靠 `s_node = nullptr` + 不 spawn `matter_adapter_task` 隔离。 | degraded 模式下 CHIP 内部状态可能残留，影响后续恢复。 | 待 Phase 3 Step 5（异常分支测试）覆盖 |
+| **多 fabric 场景未处理** | `kFabricRemoved` 回调直接将 `matter_commissioned` 设为 false，未检查剩余 fabric 数量。在 multi-admin 场景中，只移除一个 fabric 不应触发重新配网。 | 多 fabric 环境中误判配网状态。 | 待 Phase 3 Step 5 实现 fabric 计数 |
+
+## 10. 版本与变更记录
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| 0.2 | 2026-07-22 | 新增已知风险章节（实机 BLE commissioning 未验证等 3 项）；Phase 3 Step 3 完成后更新 |
 | 0.1 | 2026-07-11 | 初版：BLE commissioning、Wi-Fi 重连、恢复出厂、配置迁移、断电/watchdog 复位 |

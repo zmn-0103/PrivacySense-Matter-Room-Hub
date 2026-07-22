@@ -80,11 +80,19 @@ static node_t *s_node = nullptr;
 // ─── ESP-Matter callbacks ───
 
 // Event callback: called by the ESP-Matter CHIP task for platform events.
-// Phase 3 Step 2 only logs commissioning / IP events; room_state integration
-// is Phase 3 Step 3.
+// Phase 3 Step 3: commissioning lifecycle events are forwarded as
+// EVENT_MATTER_LIFECYCLE to g_app_event_queue so state_machine_task can
+// track matter_commissioned, commissioning_active, and wifi_connected.
+// Drop-on-full (send timeout = 0) is acceptable because Matter lifecycle
+// events are idempotent — a missed FabricRemoved, for example, will be
+// reconciled when the state machine processes the next GOT_IP or
+// DISCONNECTED event that updates room_state.wifi_connected.
 static void app_event_cb(const ChipDeviceEvent *event, intptr_t arg)
 {
     (void)arg;
+    matter_lifecycle_event_t lifecycle = MATTER_LIFECYCLE_SESSION_STOPPED;
+    bool send_lifecycle = false;
+
     switch (event->Type) {
     case DeviceEventType::kInterfaceIpAddressChanged:
         if (event->InterfaceIpAddressChanged.Type == InterfaceIpChangeType::kIpV4_Assigned) {
@@ -100,6 +108,8 @@ static void app_event_cb(const ChipDeviceEvent *event, intptr_t arg)
 
     case DeviceEventType::kCommissioningSessionStopped:
         ESP_LOGI(TAG, "event: commissioning session stopped");
+        lifecycle = MATTER_LIFECYCLE_SESSION_STOPPED;
+        send_lifecycle = true;
         break;
 
     case DeviceEventType::kCommissioningWindowOpened:
@@ -108,12 +118,14 @@ static void app_event_cb(const ChipDeviceEvent *event, intptr_t arg)
 
     case DeviceEventType::kCommissioningWindowClosed:
         ESP_LOGI(TAG, "event: commissioning window closed");
+        lifecycle = MATTER_LIFECYCLE_WINDOW_CLOSED;
+        send_lifecycle = true;
         break;
 
     case DeviceEventType::kCommissioningComplete:
         ESP_LOGI(TAG, "event: commissioning complete (fabric established)");
-        // Phase 3 Step 3: update room_state.matter_commissioned = true
-        // via app_event_queue → state_machine_task.
+        lifecycle = MATTER_LIFECYCLE_COMMISSIONING_COMPLETE;
+        send_lifecycle = true;
         break;
 
     case DeviceEventType::kFabricRemoved:
@@ -122,10 +134,24 @@ static void app_event_cb(const ChipDeviceEvent *event, intptr_t arg)
         // Phase 3 Step 5 should check remaining fabric count before deciding
         // whether to re-open commissioning or clear business config.
         ESP_LOGI(TAG, "event: fabric removed (check remaining fabric count)");
+        lifecycle = MATTER_LIFECYCLE_FABRIC_REMOVED;
+        send_lifecycle = true;
         break;
 
     default:
         break;
+    }
+
+    if (send_lifecycle) {
+        app_event_t ev = {
+            .type = EVENT_MATTER_LIFECYCLE,
+            .data.matter_lifecycle = lifecycle,
+            .timestamp_ms = xTaskGetTickCount() * portTICK_PERIOD_MS,
+        };
+        if (xQueueSend(g_app_event_queue, &ev, 0) != pdTRUE) {
+            ESP_LOGW(TAG, "lifecycle event %d dropped (app_event_queue full)",
+                     (int)lifecycle);
+        }
     }
 }
 

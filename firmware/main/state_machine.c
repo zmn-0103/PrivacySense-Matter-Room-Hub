@@ -518,7 +518,96 @@ static void process_button(button_event_t event)
 
 static void process_network(network_status_t status)
 {
-    (void)status;
+    room_state_t st;
+    if (room_state_snapshot(&st) != ESP_OK) {
+        ESP_LOGE(TAG, "process_network: snapshot failed");
+        return;
+    }
+
+    bool changed = false;
+
+    switch (status) {
+    case NETWORK_STATUS_CONNECTED:
+        if (!st.wifi_connected) {
+            st.wifi_connected = true;
+            changed = true;
+            ESP_LOGI(TAG, "network: disconnected -> connected");
+            // Wi-Fi reconnected — schedule a force-sync of all attributes
+            // once the Matter session is available (matter-data-model.md §6.3).
+            push_matter_report(MATTER_REPORT_FORCE_SYNC,
+                               st.occupancy, st.user_mode);
+        }
+        break;
+
+    case NETWORK_STATUS_DISCONNECTED:
+        if (st.wifi_connected) {
+            st.wifi_connected = false;
+            changed = true;
+            ESP_LOGI(TAG, "network: connected -> disconnected");
+        }
+        break;
+
+    case NETWORK_STATUS_PROVISIONED:
+        // Credentials received during commissioning. The actual link-up
+        // is tracked by the subsequent CONNECTED / DISCONNECTED events.
+        // wifi_connected is NOT set here — wait for GOT_IP.
+        ESP_LOGI(TAG, "network: provisioned (credentials received, awaiting link)");
+        break;
+    }
+
+    if (changed) {
+        if (room_state_update(&st) != ESP_OK) {
+            ESP_LOGE(TAG, "process_network: update failed");
+        }
+    }
+}
+
+// Phase 3 Step 3: Matter commissioning lifecycle handler.
+// Receives EVENT_MATTER_LIFECYCLE from matter_app.cpp callbacks and updates
+// matter_commissioned / commissioning_active in room_state.
+//
+// Commissioning lifecycle (commissioning-lifecycle.md §3.2):
+//   WindowOpened → SessionStarted → (PAKE exchange) →
+//     ┌─ CommissioningComplete (fabric established) → matter_commissioned = true
+//     └─ SessionStopped (no fabric) → no change
+//   WindowClosed (5 min timeout, no controller connected) → commissioning_active = false
+//   FabricRemoved → matter_commissioned = false
+static void process_matter_lifecycle(matter_lifecycle_event_t event)
+{
+    room_state_t st;
+    if (room_state_snapshot(&st) != ESP_OK) {
+        ESP_LOGE(TAG, "process_matter_lifecycle: snapshot failed");
+        return;
+    }
+
+    switch (event) {
+    case MATTER_LIFECYCLE_COMMISSIONING_COMPLETE:
+        st.matter_commissioned = true;
+        st.commissioning_active = false;
+        ESP_LOGI(TAG, "matter: commissioning complete — fabric established");
+        break;
+
+    case MATTER_LIFECYCLE_WINDOW_CLOSED:
+        st.commissioning_active = false;
+        ESP_LOGI(TAG, "matter: commissioning window closed (5 min timeout)");
+        break;
+
+    case MATTER_LIFECYCLE_FABRIC_REMOVED:
+        st.matter_commissioned = false;
+        ESP_LOGI(TAG, "matter: fabric removed — matter_commissioned cleared "
+                 "(re-commissioning may be needed)");
+        break;
+
+    case MATTER_LIFECYCLE_SESSION_STOPPED:
+        // PASE session ended without completing. commissioning_active stays
+        // true — the window may still be open for another attempt.
+        ESP_LOGI(TAG, "matter: commissioning session stopped (window may still be open)");
+        return;  // no room_state change
+    }
+
+    if (room_state_update(&st) != ESP_OK) {
+        ESP_LOGE(TAG, "process_matter_lifecycle: update failed");
+    }
 }
 
 static void process_matter_command(const matter_command_t *cmd)
@@ -633,6 +722,9 @@ void state_machine_task(void *pvParameters)
                 break;
             case EVENT_MATTER_COMMAND:
                 process_matter_command(&ev.data.matter_cmd);
+                break;
+            case EVENT_MATTER_LIFECYCLE:
+                process_matter_lifecycle(ev.data.matter_lifecycle);
                 break;
             case EVENT_MATTER_READ:
             case EVENT_TIMER_1S:
