@@ -1,0 +1,50 @@
+# Copy to agent/tasks/<task-id>.yml and replace every <placeholder>.
+task_id: "<PSRH-###>"
+title: "<short title>"
+status: "SPEC"
+goal: "<observable outcome>"
+owner: "<builder-ai identity>"
+reviewer: "Codex"
+baseline_commit: "<full git commit>"
+
+owned_paths:
+  - "<path/**>"
+read_only_paths:
+  - "docs/interfaces/**"
+  - "hardware/**"
+
+interfaces:
+  - "<docs/interfaces/document.md>"
+approved_sources:
+  - "<docs/approved_sources/index-or-record.md>"
+related_adrs:
+  - "<docs/adr/ADR-###-title.md>"
+
+constraints:
+  mcu: "ESP32-C6"
+  transport: "Matter over Wi-Fi; BLE only for commissioning/maintenance"
+  max_stack_bytes: "<value or N/A>"
+  max_flash_increase_bytes: "<value or N/A>"
+  heap_allocation_after_init: "<allowed, bounded, or forbidden>"
+  local_behavior_when_offline: "<required behavior>"
+
+acceptance:
+  - "<specific, observable acceptance criterion>"
+  - "<specific failure/recovery criterion>"
+required_evidence:
+  - "builder_handoff"
+  - "build_result"
+  - "test_result"
+  - "resource_measurement_or_gap"
+  - "sanitized_hardware_evidence_or_explicit_deferral"
+
+forbidden:
+  - "Change a public interface without approved architecture change"
+  - "Commit credentials, setup payloads, private keys, MAC addresses, or raw logs"
+  - "Bypass tests, warnings, watchdog, or error handling"
+
+approval:
+  required: true
+  approved_by: "<human name>"
+  approved_at: "<YYYY-MM-DD>"
+  notes: "<approved interface, assumptions, and test plan>"

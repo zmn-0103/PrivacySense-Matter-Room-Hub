@@ -40,7 +40,12 @@ PrivacySense-Matter-Room-Hub/
 │  ├─ matter-data-model.md     # Matter 数据模型
 │  ├─ task-architecture.md     # 任务架构
 │  ├─ commissioning-lifecycle.md # 配网与断网恢复生命周期
-│  └─ ota-safety.md            # OTA 安全边界
+│  ├─ ota-safety.md            # OTA 安全边界
+│  ├─ multi-agent-development.md # 多 Agent 任务、审批与验证流程
+│  ├─ adr/                      # 架构决策记录
+│  ├─ interfaces/               # 已批准的公共接口
+│  └─ approved_sources/         # 可作为硬件事实的资料索引
+├─ agent/          # 任务契约、交接模板和协作规则
 ├─ firmware/       # ESP-IDF/Matter 固件代码（由 Builder AI 创建）
 ├─ hardware/       # 连接表、BOM、装配记录和外壳资料
 │  ├─ connection-table.md      # GPIO/UART/I2C 连接表
@@ -54,3 +59,7 @@ PrivacySense-Matter-Room-Hub/
 项目已完成主要需求文档、Ubuntu 24.04 WSL2 工具链安装和固件骨架创建，可以进入 Builder AI 功能实现阶段。尚未完成的 Matter commissioning、干净环境下 `idf.py size` 复核、传感器实机测试和上游 commit 记录不阻塞开始写代码，但必须在对应阶段验收前补齐。环境现状见 [开发环境搭建流程](docs/development-environment.md) 和 [环境证据](tests/evidence/dev-env-config-2026-07-17.md)；其他设计见 [硬件清单](docs/hardware-selection.md)、[连接表](hardware/connection-table.md)、[计划书](docs/project-plan.md)、[状态模型](docs/state-model.md)、[Matter 数据模型](docs/matter-data-model.md) 和 [AI 协作约束](AGENTS.md)。
 
 本项目用于学习和求职作品展示，不宣称具备医疗、安防或生命安全能力。自动化动作必须允许用户关闭，并提供手动控制方式。
+
+## 多 Agent 协作
+
+功能开发遵循“任务契约 → 接口审批 → 隔离实现 → 独立验证 → 人工合并”的流程。详细规则、角色边界和 worktree 使用方式见[多 Agent 协作流程](docs/multi-agent-development.md)。
