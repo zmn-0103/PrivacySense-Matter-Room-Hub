@@ -3,18 +3,17 @@
 # ESP-IDF + ESP-Matter project entry point.
 # Toolchain baseline: ESP-IDF v5.4.1, ESP-Matter release/v1.5 (see firmware/README.md).
 #
-# Build (with esp-idf + esp-matter env loaded):
-#   source /home/administrator/esp/esp-idf/export.sh
-#   source /home/administrator/esp/esp-matter/export.sh
-#   export ESP_MATTER_PATH=/home/administrator/esp/esp-matter
+# Build (with esp-idf + esp-matter environment loaded):
+#   source <esp-idf>/export.sh
+#   source <esp-matter>/export.sh
+#   export ESP_MATTER_PATH=<esp-matter>
 #   export NINJAFLAGS=-j2
-#   idf.py -B /tmp/psrh-043-phase5-reliability-build set-target esp32c6
-#   idf.py -B /tmp/psrh-043-phase5-reliability-build reconfigure
-#   ninja -C /tmp/psrh-043-phase5-reliability-build -j2 all
-#   idf.py -B /tmp/psrh-043-phase5-reliability-build size
+#   idf.py -B <build-dir> set-target esp32c6
+#   idf.py -B <build-dir> reconfigure
+#   ninja -C <build-dir> -j2 all
+#   idf.py -B <build-dir> size
 #
-# ESP_MATTER_PATH is exported by esp-matter/export.sh and pinned explicitly
-# above so the documented command is reproducible on the Builder workstation.
+# ESP_MATTER_PATH is exported by the ESP-Matter environment script.
 #
 # Boilerplate mirrors esp-matter release/v1.5 examples/light/CMakeLists.txt.
 # Project-local components live under firmware/components/ and are appended
@@ -27,7 +26,7 @@ cmake_minimum_required(VERSION 3.5)
 if(NOT DEFINED ENV{ESP_MATTER_PATH})
     message(FATAL_ERROR
         "ESP_MATTER_PATH environment variable is not set. "
-        "Run `source /home/administrator/esp/esp-matter/export.sh` before invoking idf.py.")
+        "Run the ESP-Matter export script before invoking idf.py.")
 endif()
 
 # v1 locks the board to ESP32-C6. If a previous configure run failed mid-way

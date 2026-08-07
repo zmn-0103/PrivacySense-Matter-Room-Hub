@@ -82,27 +82,22 @@ firmware/
 ## 构建与烧录命令
 
 ```bash
-# 每个新终端先加载环境
-source /home/administrator/esp/esp-idf/export.sh
-source /home/administrator/esp/esp-matter/export.sh
-export ESP_MATTER_PATH=/home/administrator/esp/esp-matter
-export NINJAFLAGS=-j2
+# 每个新 WSL2 终端先加载环境
+source /root/esp/esp-idf/export.sh
+source /root/esp/esp-matter/export.sh
 export IDF_CCACHE_ENABLE=1
 
-# 设置目标芯片，使用隔离构建目录
-idf.py -B /tmp/psrh-043-phase5-reliability-build set-target esp32c6
+# 设置目标芯片，构建目录放在 WSL2 Linux 文件系统
+idf.py set-target esp32c6
 
 # 配置（首次或修改 sdkconfig.defaults 后）
-idf.py -B /tmp/psrh-043-phase5-reliability-build reconfigure
+idf.py reconfigure
 
 # 编译（必须限制并行度：Matter SDK 链接 libchip.a 极度耗内存，
 # 多线程并行链接会耗尽 RAM 导致系统挂起。-j2 在实际设备上已验证稳定。
 # 每次编译自动输出 log 文件到 firmware/ 上级目录。）
-ninja -C /tmp/psrh-043-phase5-reliability-build -j2 all 2>&1 | \
+ninja -C build -j2 all 2>&1 | \
   tee ../build_$(date +%Y%m%d_%H%M%S).log
-
-# 编译成功后查看 Flash/RAM size
-idf.py -B /tmp/psrh-043-phase5-reliability-build size
 
 # 烧录（通过 USB）
 idf.py -p /dev/ttyUSB0 flash 2>&1 | \
@@ -113,9 +108,9 @@ idf.py -p /dev/ttyUSB0 monitor 2>&1 | \
   tee ../monitor_$(date +%Y%m%d_%H%M%S).log
 
 # 编译 + 烧录 + 监视（推荐）
-ninja -C /tmp/psrh-043-phase5-reliability-build -j2 all 2>&1 | \
+ninja -C build -j2 all 2>&1 | \
   tee ../build_$(date +%Y%m%d_%H%M%S).log && \
-  idf.py -B /tmp/psrh-043-phase5-reliability-build -p /dev/ttyUSB0 flash monitor 2>&1 | \
+  idf.py -p /dev/ttyUSB0 flash monitor 2>&1 | \
   tee ../monitor_$(date +%Y%m%d_%H%M%S).log
 
 # 仅烧录 + 监视（编译已完成后）
@@ -137,26 +132,23 @@ idf.py -p /dev/ttyUSB0 flash monitor 2>&1 | \
 
 | 仓库 | 已验证 commit | 安装时间 | 验证方式 |
 |---|---|---|---|
-| ESP-IDF | `[TODO: git -C /home/administrator/esp/esp-idf rev-parse HEAD]` | 2026-07-17 前 | `idf.py --version` 已输出 `ESP-IDF v5.4.1` |
-| ESP-Matter | `[TODO: git -C /home/administrator/esp/esp-matter rev-parse HEAD]` | 2026-07-17 前 | `source /home/administrator/esp/esp-matter/export.sh` 已可用 |
-| connectedhomeip | `[TODO: git -C /home/administrator/esp/esp-matter/connectedhomeip/connectedhomeip rev-parse HEAD]` | 2026-07-17 前 | 随 esp-matter 子模块固定 |
+| ESP-IDF | `[TODO: git -C /root/esp/esp-idf rev-parse HEAD]` | 2026-07-17 前 | `idf.py --version` 已输出 `ESP-IDF v5.4.1` |
+| ESP-Matter | `[TODO: git -C /root/esp/esp-matter rev-parse HEAD]` | 2026-07-17 前 | `source /root/esp/esp-matter/export.sh` 已可用 |
+| connectedhomeip | `[TODO: git -C /root/esp/esp-matter/connectedhomeip/connectedhomeip rev-parse HEAD]` | 2026-07-17 前 | 随 esp-matter 子模块固定 |
 
 ### 2. 构建命令
 
 完整命令见本文档"构建与烧录命令"节。首次构建的最小序列：
 
 ```bash
-source /home/administrator/esp/esp-idf/export.sh
-source /home/administrator/esp/esp-matter/export.sh
-export ESP_MATTER_PATH=/home/administrator/esp/esp-matter
-export NINJAFLAGS=-j2
+source /root/esp/esp-idf/export.sh
+source /root/esp/esp-matter/export.sh
 export IDF_CCACHE_ENABLE=1
 
-cd /home/administrator/Project/PrivacySense-Matter-Room-Hub-worktrees/psrh-043-phase5-reliability/firmware
-idf.py -B /tmp/psrh-043-phase5-reliability-build set-target esp32c6
-idf.py -B /tmp/psrh-043-phase5-reliability-build reconfigure   # 应用 sdkconfig.defaults
-ninja -C /tmp/psrh-043-phase5-reliability-build -j2 all
-idf.py -B /tmp/psrh-043-phase5-reliability-build size
+cd /home/projects/PrivacySense-Matter-Room-Hub/firmware
+idf.py set-target esp32c6
+idf.py reconfigure   # 应用 sdkconfig.defaults
+idf.py build
 ```
 
 ### 3. 内存摘要

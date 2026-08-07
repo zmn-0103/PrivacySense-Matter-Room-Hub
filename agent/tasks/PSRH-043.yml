@@ -1,6 +1,6 @@
 task_id: "PSRH-043"
 title: "Phase 5 reliability diagnostics and resource closure"
-status: "APPROVED"
+status: "VERIFY_FAILED"
 goal: "并行完成阶段 5 的项目告警清理、资源诊断基线和可靠性证据准备，不触碰 PSRH-042 Matter 适配路径或改变冻结的安全策略"
 owner: "Builder AI (to be assigned)"
 reviewer: "Codex"

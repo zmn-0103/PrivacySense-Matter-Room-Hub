@@ -6,7 +6,7 @@
 - Baseline commit: `02e67aa5216529ca83bff32bbf46ac1a8972e48d`
 - Implementation commit: `045f37f87fce0b248a270767f6335b4b08f8724f`
 - Review-fix/contract commit: `9d83e4b`
-- Final commits: `045f37f87fce0b248a270767f6335b4b08f8724f`, `2fe9d38`, `d0b5851`, `9d83e4b`
+- Final commits: `045f37f87fce0b248a270767f6335b4b08f8724f`, `2fe9d38`, `d0b5851`, `9d83e4b`, `ef9d728`
 - Branch: `agent/psrh-043-phase5-reliability`
 - Worktree: `PrivacySense-Matter-Room-Hub-worktrees/psrh-043-phase5-reliability`
 - Date: `2026-08-08`
@@ -23,7 +23,6 @@ Changed implementation/evidence paths:
 - `tests/host/test_health_diag.c`
 - `tests/evidence/PSRH-043_*.md`
 - `agent/tasks/PSRH-043.yml`
-- `firmware/README.md` (explicit build-command documentation update)
 
 Ownership check: implementation changes remain within the contract scope and
 the read-only PSRH-042 Matter files were not modified. The pre-created task
