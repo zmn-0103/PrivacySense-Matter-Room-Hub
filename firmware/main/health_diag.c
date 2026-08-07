@@ -93,8 +93,8 @@ esp_err_t health_diag_capture(health_diag_snapshot_t *out)
         (task_count > HEALTH_DIAG_MAX_TASKS) ||
         (captured_count != task_count);
 
-    // ESP-IDF reports this high-water mark in bytes. Keep the minimum as a
-    // summary while health_diag_log() emits each bounded task record too.
+    // Keep the converted byte value as a summary while health_diag_log()
+    // emits each bounded task record too.
     for (UBaseType_t i = 0; i < captured_count; ++i) {
         uint32_t high_water_mark =
             s_task_records[i].stack_high_water_mark_bytes;
