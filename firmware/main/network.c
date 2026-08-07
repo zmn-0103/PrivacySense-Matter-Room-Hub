@@ -197,13 +197,6 @@ static network_status_t status_to_public(net_sm_status_t s)
     }
 }
 
-static bool command_is_link_event(net_cmd_type_t type)
-{
-    return type == NET_CMD_WIFI_STA_START ||
-           type == NET_CMD_WIFI_DISCONNECTED ||
-           type == NET_CMD_IP_GOT_IP;
-}
-
 static bool sequence_before(uint32_t lhs, uint32_t rhs)
 {
     return (int32_t)(lhs - rhs) < 0;

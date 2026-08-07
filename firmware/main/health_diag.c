@@ -14,12 +14,35 @@
 
 static const char *TAG = "health_diag";
 
+#define HEALTH_DIAG_TASK_NAME_BYTES  16U
+
+typedef struct {
+    char name[HEALTH_DIAG_TASK_NAME_BYTES];
+    uint32_t stack_high_water_mark_bytes;
+    uint32_t priority;
+} health_diag_task_record_t;
+
 // Static storage keeps the diagnostic path from adding a large temporary
 // object to the network task stack. uxTaskGetSystemState() is bounded by the
 // array size and is only called at boot and on the existing 30 s diagnostic
 // cadence.
 #if (configUSE_TRACE_FACILITY == 1)
 static TaskStatus_t s_task_status[HEALTH_DIAG_MAX_TASKS];
+static health_diag_task_record_t s_task_records[HEALTH_DIAG_MAX_TASKS];
+
+static void copy_task_name(char *destination, size_t destination_size,
+                           const char *source)
+{
+    if (destination_size == 0U) return;
+
+    size_t i = 0U;
+    if (source != NULL) {
+        for (; (i + 1U) < destination_size && source[i] != '\0'; ++i) {
+            destination[i] = source[i];
+        }
+    }
+    destination[i] = '\0';
+}
 #endif
 
 esp_err_t health_diag_capture(health_diag_snapshot_t *out)
@@ -37,9 +60,32 @@ esp_err_t health_diag_capture(health_diag_snapshot_t *out)
         health_diag_classify_reset_reason(out->reset_reason_code);
 
 #if (configUSE_TRACE_FACILITY == 1)
+    // Keep the scheduler suspended while copying pcTaskName. The pointer
+    // belongs to the task control block and must not be used after a task can
+    // be deleted. uxTaskGetSystemState() returns zero when the fixed array is
+    // too small; retain the real task_count so the log exposes that gap.
+    vTaskSuspendAll();
     UBaseType_t task_count = uxTaskGetNumberOfTasks();
     UBaseType_t captured_count = uxTaskGetSystemState(
         s_task_status, HEALTH_DIAG_MAX_TASKS, NULL);
+
+    if (captured_count > HEALTH_DIAG_MAX_TASKS) {
+        captured_count = HEALTH_DIAG_MAX_TASKS;
+    }
+    for (UBaseType_t i = 0; i < captured_count; ++i) {
+        copy_task_name(s_task_records[i].name,
+                       sizeof(s_task_records[i].name),
+                       s_task_status[i].pcTaskName);
+        // FreeRTOS reports this value as unused StackType_t words. Convert
+        // while the scheduler is still suspended so the stored diagnostic
+        // record and its later log do not depend on the TaskStatus_t object.
+        s_task_records[i].stack_high_water_mark_bytes =
+            (uint32_t)s_task_status[i].usStackHighWaterMark *
+            (uint32_t)sizeof(StackType_t);
+        s_task_records[i].priority =
+            (uint32_t)s_task_status[i].uxCurrentPriority;
+    }
+    (void)xTaskResumeAll();
 
     out->task_count = (uint32_t)task_count;
     out->captured_task_count = (uint32_t)captured_count;
@@ -51,7 +97,7 @@ esp_err_t health_diag_capture(health_diag_snapshot_t *out)
     // summary while health_diag_log() emits each bounded task record too.
     for (UBaseType_t i = 0; i < captured_count; ++i) {
         uint32_t high_water_mark =
-            (uint32_t)s_task_status[i].usStackHighWaterMark;
+            s_task_records[i].stack_high_water_mark_bytes;
         if (high_water_mark < out->minimum_stack_high_water_mark_bytes) {
             out->minimum_stack_high_water_mark_bytes = high_water_mark;
         }
@@ -79,12 +125,15 @@ void health_diag_log(const char *reason)
     ESP_LOGI(TAG,
              "snapshot=%s reset_reason=%d reset_class=%s free_heap=%" PRIu32
              " min_free_heap=%" PRIu32 " heap=%s tasks=%" PRIu32
-             " captured=%" PRIu32 " min_stack_hwm=%" PRIu32 " bytes",
+             " captured=%" PRIu32 " capacity=%u truncated=%s"
+             " min_stack_hwm=%" PRIu32 " bytes",
              reason, snapshot.reset_reason_code,
              health_diag_reset_class_name(snapshot.reset_class),
              snapshot.free_heap_bytes, snapshot.minimum_free_heap_bytes,
              health_diag_heap_class_name(snapshot.heap_class),
              snapshot.task_count, snapshot.captured_task_count,
+             (unsigned)HEALTH_DIAG_MAX_TASKS,
+             snapshot.task_list_truncated ? "yes" : "no",
              snapshot.minimum_stack_high_water_mark_bytes == UINT32_MAX
                  ? 0U
                  : snapshot.minimum_stack_high_water_mark_bytes);
@@ -102,11 +151,10 @@ void health_diag_log(const char *reason)
 
 #if (configUSE_TRACE_FACILITY == 1)
     for (uint32_t i = 0; i < snapshot.captured_task_count; ++i) {
-        const char *name = s_task_status[i].pcTaskName;
-        if (name == NULL) name = "?";
         ESP_LOGI(TAG, "task=%s stack_hwm=%" PRIu32 " bytes priority=%u",
-                 name, (uint32_t)s_task_status[i].usStackHighWaterMark,
-                 (unsigned)s_task_status[i].uxCurrentPriority);
+                 s_task_records[i].name,
+                 s_task_records[i].stack_high_water_mark_bytes,
+                 (unsigned)s_task_records[i].priority);
     }
 #endif
 }
