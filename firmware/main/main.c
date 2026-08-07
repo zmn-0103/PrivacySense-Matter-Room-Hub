@@ -30,6 +30,7 @@
 #include "button.h"
 #include "ui.h"
 #include "network.h"
+#include "health_diag.h"
 #include "matter_app.h"
 
 #include "ld2410c.h"
@@ -131,6 +132,7 @@ static void init_nvs(void)
 void app_main(void)
 {
     log_init_banner();
+    health_diag_log("boot");
 
     // NVS first — every other module depends on it.
     init_nvs();
@@ -252,5 +254,6 @@ void app_main(void)
     }
 
     ESP_LOGI(TAG, "all tasks spawned; app_main returning to idle");
+    health_diag_log("tasks_ready");
     // app_main returns; FreeRTOS idle task runs on CPU0.
 }

@@ -93,10 +93,8 @@ set(EXTRA_COMPONENT_DIRS
 project(privacy-sense-matter-room-hub)
 
 # Match upstream light example: C++17, optimised, CHIP_HAVE_CONFIG_H.
-# Upstream emits -Wextra warnings; suppress the noisy ones rather than
-# enabling -Werror (see firmware/README.md "First build status").
-idf_build_set_property(CXX_COMPILE_OPTIONS "-std=gnu++17;-Os;-DCHIP_HAVE_CONFIG_H;-Wno-overloaded-virtual" APPEND)
+# Keep compiler diagnostics visible in this project-owned build file. The
+# initial build does not promote all upstream warnings to errors; any emitted
+# warnings are classified in the Phase 5 evidence instead of being suppressed.
+idf_build_set_property(CXX_COMPILE_OPTIONS "-std=gnu++17;-Os;-DCHIP_HAVE_CONFIG_H" APPEND)
 idf_build_set_property(C_COMPILE_OPTIONS "-Os" APPEND)
-# For RISCV chips, project_include.cmake sets -Wno-format, but does not clear
-# various flags that depend on -Wformat.
-idf_build_set_property(COMPILE_OPTIONS "-Wno-format-nonliteral;-Wno-format-security" APPEND)

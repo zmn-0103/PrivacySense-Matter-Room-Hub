@@ -19,6 +19,7 @@ idf_component_register(
         "ui_rgb.c"
         "ssd1306.c"
         "network.c"
+        "health_diag.c"
         "matter_app.cpp"
         "config.c"
         "radar_diag.c"
@@ -30,6 +31,10 @@ idf_component_register(
         esp_timer
         esp_event
         esp_hw_support
+        esp_system
+        heap
+        freertos
+        log
         nvs_flash
         esp_wifi
         driver

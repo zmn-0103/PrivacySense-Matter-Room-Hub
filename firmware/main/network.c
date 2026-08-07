@@ -39,6 +39,7 @@
 
 #include "network_reconnect_sm.h"
 #include "state_machine.h"
+#include "health_diag.h"
 
 static const char *TAG = "network";
 
@@ -552,6 +553,7 @@ void network_task(void *pvParameters)
                          (unsigned)uxTaskGetStackHighWaterMark(NULL),
                          (int)s_sm.state);
             }
+            health_diag_log("network_periodic");
         }
 
         if (did_work) continue;
