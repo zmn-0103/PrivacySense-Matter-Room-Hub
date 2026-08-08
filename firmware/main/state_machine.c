@@ -62,14 +62,16 @@ static bool     s_hil_night_hold_until_window_exit = false;
 
 // Monotonic request generation shared with matter_adapter_task. The adapter
 // increments it when an attribute report fails; state_machine_task consumes a
-// generation only after enqueueing a FORCE_SYNC. This prevents a failure
-// racing with the enqueue/clear window from being lost.
-static volatile uint32_t s_matter_sync_request_generation = 0;
+// generation only after enqueueing a FORCE_SYNC. Use compiler atomics rather
+// than volatile: the two tasks can preempt one another, so a plain read-
+// modify-write increment could overwrite a concurrent failure notification.
+static uint32_t s_matter_sync_request_generation = 0;
 static uint32_t s_matter_sync_consumed_generation = 0;
 
 void state_machine_mark_matter_sync_pending(void)
 {
-    ++s_matter_sync_request_generation;
+    (void)__atomic_fetch_add(&s_matter_sync_request_generation, 1U,
+                             __ATOMIC_RELAXED);
 }
 
 static esp_err_t push_matter_report(matter_report_type_t type,
@@ -861,6 +863,9 @@ static void evaluate_night_window(uint32_t now_ms, const ps_config_t *cfg)
     };
 
     bool changed = false;
+#if PSRH_HIL_NIGHT_EXIT_AFTER_MS > 0U
+    bool hil_timed_exit = false;
+#endif
 
 #if PSRH_HIL_NIGHT_EXIT_AFTER_MS > 0U
     if (t.time_valid && s_hil_night_hold_until_window_exit) {
@@ -893,10 +898,7 @@ static void evaluate_night_window(uint32_t now_ms, const ps_config_t *cfg)
             (uint32_t)PSRH_HIL_NIGHT_EXIT_AFTER_MS) {
         nws.user_mode = nws.pre_night_mode;
         changed = true;
-        s_hil_night_timer_armed = false;
-        s_hil_night_hold_until_window_exit = true;
-        ESP_LOGI(TAG, "HIL NIGHT timed exit after %u ms",
-                 (unsigned)PSRH_HIL_NIGHT_EXIT_AFTER_MS);
+        hil_timed_exit = true;
     }
 #endif
 
@@ -912,7 +914,24 @@ static void evaluate_night_window(uint32_t now_ms, const ps_config_t *cfg)
     st.pre_night_mode = (user_mode_t)nws.pre_night_mode;
     st.quiet_active   = nws.quiet_active;
 
+    if (room_state_update(&st) != ESP_OK) {
+        ESP_LOGE(TAG, "evaluate_night_window: update failed");
+        return;
+    }
+
 #if PSRH_HIL_NIGHT_EXIT_AFTER_MS > 0U
+    // Commit HIL control state only after the local state update succeeds.
+    // If it fails, the timer remains armed and the next periodic evaluation
+    // retries the exit instead of holding the device in NIGHT until morning.
+    if (hil_timed_exit) {
+        s_hil_night_timer_armed = false;
+        s_hil_night_hold_until_window_exit = true;
+        ESP_LOGI(TAG, "HIL NIGHT timed exit after %u ms",
+                 (unsigned)PSRH_HIL_NIGHT_EXIT_AFTER_MS);
+    } else if (prev_mode == MODE_NIGHT && st.user_mode != MODE_NIGHT) {
+        s_hil_night_timer_armed = false;
+    }
+
     if (t.time_valid && prev_mode != MODE_NIGHT && st.user_mode == MODE_NIGHT) {
         s_hil_night_enter_ms = now_ms;
         s_hil_night_timer_armed = true;
@@ -920,11 +939,6 @@ static void evaluate_night_window(uint32_t now_ms, const ps_config_t *cfg)
                  (unsigned)PSRH_HIL_NIGHT_EXIT_AFTER_MS);
     }
 #endif
-
-    if (room_state_update(&st) != ESP_OK) {
-        ESP_LOGE(TAG, "evaluate_night_window: update failed");
-        return;
-    }
 
     ESP_LOGI(TAG, "night window: mode %s -> %s",
              prev_mode == MODE_NORMAL ? "NORMAL" :
@@ -1010,7 +1024,8 @@ void state_machine_task(void *pvParameters)
         evaluate_night_window(xTaskGetTickCount() * portTICK_PERIOD_MS, &cfg);
         radar_check_timeout();
 
-        uint32_t sync_generation = s_matter_sync_request_generation;
+        uint32_t sync_generation = __atomic_load_n(
+            &s_matter_sync_request_generation, __ATOMIC_RELAXED);
         if (sync_generation != s_matter_sync_consumed_generation) {
             room_state_t rs;
             if (room_state_snapshot(&rs) == ESP_OK) {

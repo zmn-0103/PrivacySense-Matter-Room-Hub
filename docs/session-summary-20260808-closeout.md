@@ -1,7 +1,7 @@
 # PSRH-042 当前会话收口摘要
 
-日期：2026-08-08  
-分支：`agent/psrh-042-matter-v15`  
+日期：2026-08-08
+分支：`agent/psrh-042-matter-v15`
 工作树：`PrivacySense-Matter-Room-Hub-worktrees/psrh-042-matter-v15`
 
 ## 1. 用户约束与范围

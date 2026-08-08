@@ -671,7 +671,17 @@ static esp_err_t matter_app_request_change_to_mode(uint8_t new_mode)
     ev.data.matter_cmd.cmd_ctx = nullptr;
     ev.data.matter_cmd.resp_handle = &s_matter_mode_request;
     ev.timestamp_ms = xTaskGetTickCount() * portTICK_PERIOD_MS;
+
+    // xQueueSend can immediately schedule state_machine_task, which has a
+    // higher priority than the CHIP task.  Release the request lock before
+    // making the event visible, otherwise the state machine's fail-closed
+    // cancellation check would see this live request as unavailable and
+    // reject a valid controller command.
+    xSemaphoreGive(s_matter_command_mutex);
     if (xQueueSend(g_app_event_queue, &ev, 0) != pdTRUE) {
+        if (xSemaphoreTake(s_matter_command_mutex, portMAX_DELAY) != pdTRUE) {
+            return ESP_ERR_TIMEOUT;
+        }
         s_matter_mode_request.in_use = false;
         s_matter_mode_request.caller_waiting = false;
         s_matter_mode_request.completed = false;
@@ -679,8 +689,6 @@ static esp_err_t matter_app_request_change_to_mode(uint8_t new_mode)
         xSemaphoreGive(s_matter_command_mutex);
         return ESP_ERR_NO_MEM;
     }
-
-    xSemaphoreGive(s_matter_command_mutex);
 
     BaseType_t response_received = xSemaphoreTake(
         s_matter_mode_request.completion,
