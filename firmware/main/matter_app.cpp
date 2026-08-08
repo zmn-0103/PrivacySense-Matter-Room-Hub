@@ -48,8 +48,8 @@
 //     that consumes g_matter_report_queue and applies attribute updates on
 //     the CHIP stack context.
 //   - 2 s queue wait timeout → feed TWDT and re-check health.
-//   - ChangeToMode responses are routed through this task to keep the actual
-//     esp_matter call on the CHIP stack context.
+//   - ChangeToMode is completed by the CHIP task's SupportedModesManager;
+//     this adapter only applies state-machine attribute reports.
 
 #include "matter_app.h"
 
@@ -66,6 +66,7 @@
 #include "nvs_flash.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 
 #include "config.h"
@@ -93,6 +94,36 @@ static endpoint_t *s_ep2_mode_select  = nullptr;   // Mode Select (0x0027)
 // Cached endpoint IDs for attribute updates in matter_adapter_task.
 static uint16_t s_ep1_id = 0;
 static uint16_t s_ep2_id = 0;
+
+#define MATTER_COMMAND_RESPONSE_TIMEOUT_MS 100U
+
+// The locked Mode Select server ignores the return value from
+// CurrentMode::Set().  The SupportedModesManager is therefore the only
+// place where a ChangeToMode status can still be rejected. It submits a
+// request to state_machine_task and waits on this private, static response
+// slot before returning Success to the SDK. The slot is static rather than
+// stack-owned so a late state-machine response after the bounded wait cannot
+// dereference a dead CHIP callback frame.
+typedef struct {
+    StaticSemaphore_t completion_storage;
+    SemaphoreHandle_t completion;
+    bool              in_use;
+    bool              caller_waiting;
+    bool              completed;
+    bool              success;
+} matter_mode_request_t;
+
+static matter_mode_request_t s_matter_mode_request = {};
+static StaticSemaphore_t s_matter_command_mutex_storage;
+static SemaphoreHandle_t s_matter_command_mutex = nullptr;
+
+// Set by SupportedModesManager immediately before the SDK performs
+// CurrentMode::Set(). Local projections use attribute::report(), so a
+// PRE_UPDATE callback is only expected for the controller's accepted write.
+static bool    s_controller_mode_update_pending = false;
+static uint8_t s_controller_mode_expected = 0;
+
+static esp_err_t matter_app_request_change_to_mode(uint8_t new_mode);
 
 // ChangeToMode is validated by the ESP-Matter ModeSelect server before it
 // writes CurrentMode. Keep the policy check synchronous at that boundary so
@@ -187,6 +218,19 @@ public:
                     return chip::Protocols::InteractionModel::Status::Failure;
                 }
                 *data_ptr = &option;
+
+                // This call is deliberately before the locked SDK writes
+                // CurrentMode. The SDK ignores the setter's esp_err_t, so
+                // all queue/state-machine failures must be converted to an
+                // Interaction Model failure here.
+                esp_err_t request_err = matter_app_request_change_to_mode(mode);
+                if (request_err != ESP_OK) {
+                    ESP_LOGW(TAG, "ChangeToMode: local transition failed: %s",
+                             esp_err_to_name(request_err));
+                    return chip::Protocols::InteractionModel::Status::Failure;
+                }
+                s_controller_mode_expected = mode;
+                s_controller_mode_update_pending = true;
                 return chip::Protocols::InteractionModel::Status::Success;
             }
         }
@@ -302,9 +346,11 @@ static void app_event_cb(const ChipDeviceEvent *event, intptr_t arg)
     }
 }
 
-// Attribute update callback: called when a controller writes an attribute.
-// Phase 3 Step 6: handle ChangeToMode on EP2 ModeSelect → app_event_queue.
-// EP0 root node attributes are handled internally by ESP-Matter.
+// Attribute update callback: called when an attribute is updated through the
+// callback path. ChangeToMode itself is synchronously accepted/rejected by
+// room_supported_modes_manager above. This callback only acknowledges the
+// SDK's subsequent CurrentMode::Set() and deliberately never turns local
+// projections into Matter commands.
 static esp_err_t app_attribute_update_cb(attribute::callback_type_t type,
                                          uint16_t endpoint_id,
                                          uint32_t cluster_id,
@@ -314,7 +360,7 @@ static esp_err_t app_attribute_update_cb(attribute::callback_type_t type,
 {
     (void)priv_data;
 
-    // Only handle PRE_UPDATE on EP2 ModeSelect::CurrentMode (ChangeToMode).
+    // Only observe PRE_UPDATE on EP2 ModeSelect::CurrentMode.
     if (type != attribute::PRE_UPDATE ||
         endpoint_id != s_ep2_id ||
         cluster_id != ModeSelect::Id ||
@@ -322,24 +368,29 @@ static esp_err_t app_attribute_update_cb(attribute::callback_type_t type,
         return ESP_OK;
     }
 
-    // The CHIP SDK validates the mode against SupportedModes before calling
-    // this callback, so val->val.u8 is guaranteed to be a valid mode (0-2).
-    uint8_t new_mode = val->val.u8;
-    ESP_LOGI(TAG, "ChangeToMode: controller requests mode %u", (unsigned)new_mode);
+    if (val == nullptr) {
+        ESP_LOGE(TAG, "CurrentMode PRE_UPDATE received with NULL value");
+        return ESP_ERR_INVALID_ARG;
+    }
 
-    // The SupportedModesManager has already applied the synchronous local
-    // policy gate. Forward to state_machine_task for execution and its
-    // defense-in-depth re-check after the queue handoff.
-    app_event_t ev = {};
-    ev.type = EVENT_MATTER_COMMAND;
-    ev.data.matter_cmd.type = MATTER_COMMAND_CHANGE_TO_MODE;
-    ev.data.matter_cmd.new_mode = new_mode;
-    ev.data.matter_cmd.cmd_ctx = nullptr;
-    ev.timestamp_ms = xTaskGetTickCount() * portTICK_PERIOD_MS;
-    if (xQueueSend(g_app_event_queue, &ev, 0) != pdTRUE) {
-        ESP_LOGE(TAG, "ChangeToMode event dropped (queue full) — command ignored");
+    uint8_t new_mode = val->val.u8;
+    if (!s_controller_mode_update_pending) {
+        // Local state projections use attribute::report(), which bypasses
+        // this callback. Keep this path harmless for SDK-internal updates.
+        ESP_LOGD(TAG, "CurrentMode PRE_UPDATE %u ignored (not a controller command)",
+                 (unsigned)new_mode);
+        return ESP_OK;
+    }
+
+    s_controller_mode_update_pending = false;
+    if (new_mode != s_controller_mode_expected) {
+        ESP_LOGE(TAG, "CurrentMode PRE_UPDATE mismatch: expected %u, got %u",
+                 (unsigned)s_controller_mode_expected, (unsigned)new_mode);
         return ESP_FAIL;
     }
+
+    ESP_LOGI(TAG, "ChangeToMode: controller transition committed, CurrentMode=%u",
+             (unsigned)new_mode);
     return ESP_OK;
 }
 
@@ -366,6 +417,16 @@ esp_err_t matter_app_init(void)
     if (s_node != nullptr) {
         ESP_LOGW(TAG, "matter_app_init called twice");
         return ESP_ERR_INVALID_STATE;
+    }
+
+    if (s_matter_command_mutex == nullptr) {
+        s_matter_command_mutex = xSemaphoreCreateMutexStatic(&s_matter_command_mutex_storage);
+        s_matter_mode_request.completion =
+            xSemaphoreCreateBinaryStatic(&s_matter_mode_request.completion_storage);
+        if (s_matter_command_mutex == nullptr || s_matter_mode_request.completion == nullptr) {
+            ESP_LOGE(TAG, "Matter command response primitives unavailable");
+            return ESP_ERR_NO_MEM;
+        }
     }
 
     // ── Step 1: create EP0 Root Node ──
@@ -459,16 +520,100 @@ esp_err_t matter_app_init(void)
 
 esp_err_t matter_app_respond_change_to_mode(void *cmd_ctx, bool success)
 {
-    (void)cmd_ctx;
-    // Phase 3 Step 6: the CHIP stack handles the ChangeToMode response
-    // automatically through the attribute::callback_type_t return value
-    // in app_attribute_update_cb. Accepting the mode there (returning ESP_OK)
-    // already tells the controller the write succeeded. This function is
-    // retained for ABI compatibility with matter_app.h; state_machine_task
-    // processes the mode change asynchronously and pushes a MATTER_REPORT
-    // via g_matter_report_queue.
-    (void)success;
-    return ESP_OK;
+    if (cmd_ctx != &s_matter_mode_request ||
+        s_matter_command_mutex == nullptr ||
+        s_matter_mode_request.completion == nullptr) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (xSemaphoreTake(s_matter_command_mutex, portMAX_DELAY) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+
+    if (!s_matter_mode_request.in_use || s_matter_mode_request.completed) {
+        xSemaphoreGive(s_matter_command_mutex);
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    s_matter_mode_request.success = success;
+    s_matter_mode_request.completed = true;
+    bool release_slot = !s_matter_mode_request.caller_waiting;
+    if (release_slot) {
+        s_matter_mode_request.in_use = false;
+    }
+
+    BaseType_t give_ret = xSemaphoreGive(s_matter_mode_request.completion);
+    xSemaphoreGive(s_matter_command_mutex);
+    return give_ret == pdTRUE ? ESP_OK : ESP_FAIL;
+}
+
+// Called from the CHIP task while SupportedModesManager is validating a
+// ChangeToMode command. The request object is static so a timeout cannot
+// leave state_machine_task holding a pointer into a returned stack frame.
+static esp_err_t matter_app_request_change_to_mode(uint8_t new_mode)
+{
+    if (g_app_event_queue == nullptr ||
+        s_matter_command_mutex == nullptr ||
+        s_matter_mode_request.completion == nullptr) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (xSemaphoreTake(s_matter_command_mutex, 0) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+
+    if (s_matter_mode_request.in_use) {
+        xSemaphoreGive(s_matter_command_mutex);
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    // A timed-out request may have completed after its caller returned. Drain
+    // that late signal before reusing the static slot.
+    (void)xSemaphoreTake(s_matter_mode_request.completion, 0);
+    s_matter_mode_request.in_use = true;
+    s_matter_mode_request.caller_waiting = true;
+    s_matter_mode_request.completed = false;
+    s_matter_mode_request.success = false;
+
+    app_event_t ev = {};
+    ev.type = EVENT_MATTER_COMMAND;
+    ev.data.matter_cmd.type = MATTER_COMMAND_CHANGE_TO_MODE;
+    ev.data.matter_cmd.new_mode = new_mode;
+    ev.data.matter_cmd.cmd_ctx = nullptr;
+    ev.data.matter_cmd.resp_handle = &s_matter_mode_request;
+    ev.timestamp_ms = xTaskGetTickCount() * portTICK_PERIOD_MS;
+    if (xQueueSend(g_app_event_queue, &ev, 0) != pdTRUE) {
+        s_matter_mode_request.in_use = false;
+        s_matter_mode_request.caller_waiting = false;
+        s_matter_mode_request.completed = false;
+        xSemaphoreGive(s_matter_command_mutex);
+        return ESP_ERR_NO_MEM;
+    }
+
+    xSemaphoreGive(s_matter_command_mutex);
+
+    BaseType_t response_received = xSemaphoreTake(
+        s_matter_mode_request.completion,
+        pdMS_TO_TICKS(MATTER_COMMAND_RESPONSE_TIMEOUT_MS));
+
+    if (xSemaphoreTake(s_matter_command_mutex, portMAX_DELAY) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+
+    bool completed = s_matter_mode_request.completed;
+    bool success = s_matter_mode_request.success;
+    s_matter_mode_request.caller_waiting = false;
+    if (completed) {
+        s_matter_mode_request.in_use = false;
+    }
+    xSemaphoreGive(s_matter_command_mutex);
+
+    if (response_received != pdTRUE && !completed) {
+        ESP_LOGE(TAG, "ChangeToMode response timed out after %u ms",
+                 MATTER_COMMAND_RESPONSE_TIMEOUT_MS);
+        return ESP_ERR_TIMEOUT;
+    }
+    return success ? ESP_OK : ESP_FAIL;
 }
 
 void matter_adapter_task(void *pvParameters)
@@ -486,7 +631,7 @@ void matter_adapter_task(void *pvParameters)
         if (xQueueReceive(g_matter_report_queue, &report,
                           pdMS_TO_TICKS(MATTER_ADAPTER_QUEUE_TIMEOUT_MS)) == pdTRUE) {
             // Phase 3 Step 6: apply reports to EP1/EP2 Matter attributes.
-            // All attribute::update calls MUST be under the CHIP stack lock
+            // All attribute::report calls MUST be under the CHIP stack lock
             // (task-architecture.md §4.7, §6.2). ScopedChipStackLock is RAII
             // and releases automatically when the scope exits.
 
@@ -521,22 +666,36 @@ void matter_adapter_task(void *pvParameters)
 
                 if (should_update_occupancy) {
                     esp_matter_attr_val_t val = esp_matter_bitmap8(occ_val);
-                    attribute::update(s_ep1_id,
-                                      OccupancySensing::Id,
-                                      OccupancySensing::Attributes::Occupancy::Id,
-                                      &val);
-                    ESP_LOGD(TAG, "EP1 occupancy → %u", (unsigned)occ_val);
+                    esp_err_t ret = attribute::report(
+                        s_ep1_id,
+                        OccupancySensing::Id,
+                        OccupancySensing::Attributes::Occupancy::Id,
+                        &val);
+                    if (ret != ESP_OK) {
+                        ESP_LOGE(TAG, "EP1 occupancy report failed: %s",
+                                 esp_err_to_name(ret));
+                        state_machine_mark_matter_sync_pending();
+                    } else {
+                        ESP_LOGD(TAG, "EP1 occupancy → %u", (unsigned)occ_val);
+                    }
                 }
 
                 if (should_update_mode) {
                     esp_matter_attr_val_t val =
                         esp_matter_uint8((uint8_t)report.user_mode);
-                    attribute::update(s_ep2_id,
-                                      ModeSelect::Id,
-                                      ModeSelect::Attributes::CurrentMode::Id,
-                                      &val);
-                    ESP_LOGD(TAG, "EP2 CurrentMode → %u",
-                             (unsigned)report.user_mode);
+                    esp_err_t ret = attribute::report(
+                        s_ep2_id,
+                        ModeSelect::Id,
+                        ModeSelect::Attributes::CurrentMode::Id,
+                        &val);
+                    if (ret != ESP_OK) {
+                        ESP_LOGE(TAG, "EP2 CurrentMode report failed: %s",
+                                 esp_err_to_name(ret));
+                        state_machine_mark_matter_sync_pending();
+                    } else {
+                        ESP_LOGD(TAG, "EP2 CurrentMode → %u",
+                                 (unsigned)report.user_mode);
+                    }
                 }
             }
         }

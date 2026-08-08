@@ -47,7 +47,17 @@ static env_alert_sm_t     s_env_alert_sm;
 static env_alert_config_t s_env_alert_cfg;
 static night_window_config_t s_night_cfg;
 
-static bool s_matter_sync_pending = false;
+// Monotonic request generation shared with matter_adapter_task. The adapter
+// increments it when an attribute report fails; state_machine_task consumes a
+// generation only after enqueueing a FORCE_SYNC. This prevents a failure
+// racing with the enqueue/clear window from being lost.
+static volatile uint32_t s_matter_sync_request_generation = 0;
+static uint32_t s_matter_sync_consumed_generation = 0;
+
+void state_machine_mark_matter_sync_pending(void)
+{
+    ++s_matter_sync_request_generation;
+}
 
 static esp_err_t push_matter_report(matter_report_type_t type,
                                     occupancy_state_t occ,
@@ -56,7 +66,7 @@ static esp_err_t push_matter_report(matter_report_type_t type,
     matter_report_t rpt = { .type = type, .occupancy = occ, .user_mode = mode };
     if (xQueueSend(g_matter_report_queue, &rpt, 0) != pdTRUE) {
         ESP_LOGW(TAG, "matter report dropped (type=%d)", (int)type);
-        s_matter_sync_pending = true;
+        state_machine_mark_matter_sync_pending();
         return ESP_ERR_NO_MEM;
     }
     return ESP_OK;
@@ -676,44 +686,75 @@ static bool matter_night_window_allows_entry(const ps_config_t *cfg)
     return candidate.user_mode == NIGHT_WINDOW_MODE_NIGHT;
 }
 
+static void respond_matter_command(const matter_command_t *cmd, bool success)
+{
+    if (cmd == NULL || cmd->resp_handle == NULL) {
+        ESP_LOGE(TAG, "MATTER ChangeToMode response handle missing");
+        return;
+    }
+
+    esp_err_t ret = matter_app_respond_change_to_mode(cmd->resp_handle, success);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "MATTER ChangeToMode response failed: %s",
+                 esp_err_to_name(ret));
+    }
+}
+
 static void process_matter_command(const matter_command_t *cmd,
                                    const ps_config_t *cfg)
 {
+    if (cmd == NULL || cfg == NULL) {
+        ESP_LOGE(TAG, "MATTER ChangeToMode: command/config missing");
+        respond_matter_command(cmd, false);
+        return;
+    }
+
     if (cmd->type != MATTER_COMMAND_CHANGE_TO_MODE) {
         ESP_LOGW(TAG, "unknown matter command type %d", (int)cmd->type);
+        respond_matter_command(cmd, false);
         return;
     }
 
     uint8_t new_mode = cmd->new_mode;
     if (new_mode > 2) {
         ESP_LOGW(TAG, "MATTER ChangeToMode: rejected invalid mode %u", (unsigned)new_mode);
+        respond_matter_command(cmd, false);
         return;
     }
 
     if (new_mode == MODE_NIGHT && !matter_night_window_allows_entry(cfg)) {
         ESP_LOGW(TAG, "MATTER ChangeToMode: NIGHT rejected outside valid night window");
+        respond_matter_command(cmd, false);
         return;
     }
 
     // Phase 3 Step 6: apply the mode change directly. A controller-initiated
     // ChangeToMode overrides the current user_mode and resets quiet_active
     // (the controller is authoritative for mode selection, unlike short-press
-    // toggles). pre_night_mode is preserved so NIGHT window auto-switch can
-    // restore it later.
+    // toggles). On entry to NIGHT, save the actual mode immediately before
+    // entry; this must also work for QUIET → NIGHT. For an explicit non-NIGHT
+    // controller mode, make that mode the next NIGHT restore baseline.
     room_state_t st;
     if (room_state_snapshot(&st) != ESP_OK) {
         ESP_LOGE(TAG, "MATTER ChangeToMode: snapshot failed");
+        respond_matter_command(cmd, false);
         return;
     }
 
     user_mode_t target = (user_mode_t)new_mode;
     user_mode_t old_mode = st.user_mode;
 
+    if (target == MODE_NIGHT && old_mode != MODE_NIGHT) {
+        st.pre_night_mode = old_mode;
+    } else if (target != MODE_NIGHT) {
+        st.pre_night_mode = target;
+    }
     st.user_mode    = target;
     st.quiet_active = false;   // direct set, not a toggle
 
     if (room_state_update(&st) != ESP_OK) {
         ESP_LOGE(TAG, "MATTER ChangeToMode: update failed");
+        respond_matter_command(cmd, false);
         return;
     }
 
@@ -723,11 +764,12 @@ static void process_matter_command(const matter_command_t *cmd,
              target == MODE_NORMAL ? "NORMAL" :
              target == MODE_QUIET  ? "QUIET"  : "NIGHT");
 
-    // Push report so matter_adapter_task syncs the CurrentMode attribute.
-    // The CHIP stack already accepted the write (app_attribute_update_cb
-    // returned ESP_OK), so this is a best-effort sync of the actual state.
+    // Push report so matter_adapter_task can reconcile the attribute. A full
+    // report queue does not undo the committed local state: push_matter_report
+    // arms the generation-based FORCE_SYNC retry path instead.
     (void)push_matter_report(MATTER_REPORT_CURRENT_MODE,
                              st.occupancy, st.user_mode);
+    respond_matter_command(cmd, true);
 }
 
 // Phase 2: NIGHT window evaluation via the pure-logic night_window_sm.
@@ -744,7 +786,8 @@ static void process_matter_command(const matter_command_t *cmd,
 //
 // Local state update does NOT depend on Matter queue success: even if
 // push_matter_report drops the report, room_state is already updated and
-// s_matter_sync_pending will trigger a force-sync retry on the next loop.
+// the generation-based sync request will trigger a force-sync retry on the
+// next loop.
 static void evaluate_night_window(uint32_t now_ms, const ps_config_t *cfg)
 {
     (void)now_ms;
@@ -864,7 +907,8 @@ void state_machine_task(void *pvParameters)
         evaluate_night_window(xTaskGetTickCount() * portTICK_PERIOD_MS, &cfg);
         radar_check_timeout();
 
-        if (s_matter_sync_pending) {
+        uint32_t sync_generation = s_matter_sync_request_generation;
+        if (sync_generation != s_matter_sync_consumed_generation) {
             room_state_t rs;
             if (room_state_snapshot(&rs) == ESP_OK) {
                 matter_report_t rpt = {
@@ -873,7 +917,7 @@ void state_machine_task(void *pvParameters)
                     .user_mode = rs.user_mode,
                 };
                 if (xQueueSend(g_matter_report_queue, &rpt, 0) == pdTRUE) {
-                    s_matter_sync_pending = false;
+                    s_matter_sync_consumed_generation = sync_generation;
                     ESP_LOGI(TAG, "matter sync retry ok");
                 }
             }

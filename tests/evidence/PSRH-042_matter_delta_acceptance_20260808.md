@@ -14,7 +14,7 @@
 | T10 Matter 控制器恢复 | **PASS** | 独立 `chip-tool` 进程重新初始化控制器、恢复 Fabric、完成 CASE 后读取 EP1/EP2；未重复本地/Wi‑Fi部分。 |
 | T12 Matter 恢复/同步 | **PASS** | 设备断电重启并重新挂载后，控制器通过 Operational IPv6/CASE 读取 EP1 `Occupancy=1`、EP2 `CurrentMode=2`。 |
 | T15 恢复出厂后重新配网 | **PASS（历史摘要，原始日志不可恢复）** | 上一会话摘要记录 Pairing/PASE、NOC/CASE、Operational discovery 和 commissioning complete 成功及后续读取；本次不重跑。 |
-| T19 Matter | **PASS（恢复后可读；同步未充分验证）** | 仅有恢复后的 Matter 读取摘要；没有实际断网期间改变本地状态、恢复后读取最新值的闭环。 |
+| T19 Matter | **PARTIAL（恢复后可读；同步未充分验证）** | 仅有恢复后的 Matter 读取摘要；没有实际断网期间改变本地状态、恢复后读取最新值的闭环。 |
 
 ## 明确未声称的结果
 

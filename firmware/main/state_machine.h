@@ -58,7 +58,7 @@ typedef enum {
     NETWORK_STATUS_PROVISIONED,    // Credentials received, connecting
 } network_status_t;
 
-// --- Matter commands (produced by matter_adapter_task from CHIP callbacks) ---
+// --- Matter commands (submitted by the synchronous ModeSelect validator) ---
 typedef enum {
     MATTER_COMMAND_CHANGE_TO_MODE = 0,   // ModeSelect ChangeToMode(newMode)
 } matter_command_type_t;
@@ -66,8 +66,8 @@ typedef enum {
 typedef struct {
     matter_command_type_t type;
     uint8_t               new_mode;       // 0=NORMAL, 1=QUIET, 2=NIGHT
-    void                 *cmd_ctx;        // Opaque CHIP command context
-    void                *resp_handle;     // Opaque handle for async response
+    void                 *cmd_ctx;        // Reserved; never carries a CHIP context
+    void                *resp_handle;     // Private bounded-wait response handle
 } matter_command_t;
 
 // --- Matter commissioning lifecycle events (produced by matter_app.cpp) ---
@@ -129,6 +129,11 @@ void state_machine_task(void *pvParameters);
 // config_event_queue: depth 4, single consumer = config_task (defined in config.h).
 extern QueueHandle_t g_app_event_queue;
 extern QueueHandle_t g_matter_report_queue;
+
+// Called by matter_adapter_task when an attribute projection fails. The
+// state-machine task enqueues a FORCE_SYNC retry and does not clear the
+// request if another failure races with that enqueue.
+void state_machine_mark_matter_sync_pending(void);
 
 #ifdef __cplusplus
 }
