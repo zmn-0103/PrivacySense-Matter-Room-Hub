@@ -5,13 +5,13 @@
 ## 当前状态
 
 - 分支：`agent/psrh-042-matter-v15`
-- 当前 HEAD：`d369403`（仅更新任务契约与 Builder handoff）
 - 最后一个固件代码提交：`2f5d58379360d759aa4c6ffd8c5574ff247c2cf5`
+- 交接状态提交：`d369403`（仅更新任务契约与 Builder handoff）
 - 任务状态：`PENDING_REVIEW`
 - 独立 Reviewer 的历史结论：`REQUEST_CHANGES`
 - 当前不具备 `READY_TO_MERGE` 条件。
 
-`d369403` 未修改 `firmware/`；用于生产烧录和后续 HIL 的代码仍冻结于
+`d369403` 及本总结的后续元数据提交均未修改 `firmware/`；用于生产烧录和后续 HIL 的代码仍冻结于
 `2f5d583`。
 
 ## 已提交的 Reviewer 修复
