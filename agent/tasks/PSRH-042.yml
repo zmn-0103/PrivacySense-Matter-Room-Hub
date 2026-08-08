@@ -1,6 +1,6 @@
 task_id: "PSRH-042"
 title: "Matter API compatibility on ESP-Matter release/v1.5"
-status: "VERIFYING"
+status: "PENDING_REVIEW" # 待审
 goal: "在锁定的 ESP-Matter release/v1.5 上完成 Matter API 兼容、保持 EP0/EP1/EP2 数据模型不变，并产生构建/size/测试证据"
 builder_lead: "gpt-5.6-terra"
 owner: "gpt-5.6-luna"
@@ -14,22 +14,26 @@ review_scope:
     - "b9dee960936e61b136ffb19598abd21ae9f456f2"
     - "54014834049fb44e7f3564e40b334b438a3bd10c"
     - "587243575138a3983c6658c4eb991d89ffa1de2f"
+    - "5d2e356312b998b3f22a3f6b4855b49632756e51"
+    - "6f498dffdd38eeaea257b9e6f23597bb2b45731b"
   excluded_commits:
     - commit: "c341e512600e673ca23fb73b377a4a8052d1b3a1"
       reason: "Separately synchronized collaboration/governance documentation; not PSRH-042 functional delivery."
 
 owned_paths:
+  - "firmware/main/CMakeLists.txt"
   - "firmware/main/matter_app.cpp"
   - "firmware/main/state_machine.c"
 # The two headers below carry the private response-handle declaration and the
 # retry helper used by the two owned implementation units. They are included
-# in this closeout's explicitly approved implementation scope; no public
+# in this closeout's explicitly approved implementation/build scope; no public
 # Matter endpoint/interface is changed.
   - "firmware/main/matter_app.h"
   - "firmware/main/state_machine.h"
 
 delivery_scope:
   implementation_paths:
+    - "firmware/main/CMakeLists.txt"
     - "firmware/main/matter_app.cpp"
     - "firmware/main/matter_app.h"
     - "firmware/main/state_machine.c"
@@ -39,7 +43,7 @@ delivery_scope:
     - "tests/evidence/PSRH-042_builder_handoff.md"
     - "tests/evidence/PSRH-042_matter_delta_acceptance_20260808.md"
     - "docs/session-summary-20260808.md"
-  approval: "Human Lead explicitly requested this implementation, task-contract, sanitized-evidence, handoff, and acceptance-summary closeout on 2026-08-08. The implementation owned paths remain limited to the four listed source/header files; metadata paths are delivery artifacts."
+  approval: "Human Lead explicitly requested this implementation, task-contract, sanitized-evidence, handoff, and acceptance-summary closeout on 2026-08-08. The approved implementation/build scope includes firmware/main/CMakeLists.txt plus the four listed source/header files; metadata paths are delivery artifacts."
   excluded_preexisting_history:
     commit: "c341e51"
     paths:
@@ -116,4 +120,4 @@ approval:
   required: true
   approved_by: "Human Lead (explicit user approval)"
   approved_at: "2026-08-07"
-  notes: "Approved to proceed from baseline 02e67aa in the isolated Builder branch/worktree and a task-specific external build directory. EP0/EP1/EP2 topology, device types, clusters, attributes, mode values, and offline semantics are frozen. The Radar FeatureMap addition is explicitly approved as the sole Matter data-model delta; no other model/interface change is approved. Build, size, test, and handoff evidence are mandatory. Follow-up scope explicitly requested by Human Lead on 2026-08-07: add the ChangeToMode NIGHT window semantic guard in firmware/main/matter_app.cpp and firmware/main/state_machine.c without changing the Matter data model. Follow-up scope explicitly requested by Human Lead on 2026-08-08: close the reviewer findings in the owned implementation units, include their private headers, update the task contract, and commit sanitized evidence, the builder handoff, and the acceptance/session summary."
+  notes: "Approved to proceed from baseline 02e67aa in the isolated Builder branch/worktree and a task-specific external build directory. EP0/EP1/EP2 topology, device types, clusters, attributes, mode values, and offline semantics are frozen. The Radar FeatureMap addition is explicitly approved as the sole Matter data-model delta; no other model/interface change is approved. Build, size, test, and handoff evidence are mandatory. Follow-up scope explicitly requested by Human Lead on 2026-08-07: add the ChangeToMode NIGHT window semantic guard in firmware/main/matter_app.cpp and firmware/main/state_machine.c without changing the Matter data model. Follow-up scope explicitly requested by Human Lead on 2026-08-08: close the reviewer findings in the owned implementation units, include their private headers, update the task contract, and commit sanitized evidence, the builder handoff, and the acceptance/session summary. Follow-up scope explicitly requested by Human Lead on 2026-08-09: include firmware/main/CMakeLists.txt in the approved owned/delivery scope and submit commits 5d2e356 and 6f498df for review."
