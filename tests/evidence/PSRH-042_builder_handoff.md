@@ -5,13 +5,13 @@
 - Task contract: [`agent/tasks/PSRH-042.yml`](../../agent/tasks/PSRH-042.yml)
 - Baseline commit: `02e67aa5216529ca83bff32bbf46ac1a8972e48d`
 - Branch/worktree: `agent/psrh-042-matter-v15` / `PrivacySense-Matter-Room-Hub-worktrees/psrh-042-matter-v15`
-- Fixed independent review target: implementation commits `2392a3b54564fcc270faa54d98bbdc7e3d923298` and `b9dee960936e61b136ffb19598abd21ae9f456f2`, plus metadata commits `54014834049fb44e7f3564e40b334b438a3bd10c` and `587243575138a3983c6658c4eb991d89ffa1de2f`.
+- Fixed independent review target: `2392a3b54564fcc270faa54d98bbdc7e3d923298`, `b9dee960936e61b136ffb19598abd21ae9f456f2`, `54014834049fb44e7f3564e40b334b438a3bd10c`, `587243575138a3983c6658c4eb991d89ffa1de2f`, `5d2e356312b998b3f22a3f6b4855b49632756e51`, `6f498dffdd38eeaea257b9e6f23597bb2b45731b`, reviewer-remediation implementation `2f5d58379360d759aa4c6ffd8c5574ff247c2cf5`, and frozen-state metadata `560734bd254ac1953327149a787b5525c3229648`.
 - Roles: builder lead `gpt-5.6-terra`; builder `gpt-5.6-luna` with reasoning effort `max`; independent reviewer `gpt-5.6-sol`.
-- Independent review status: **SKIPPED** per Human Lead instruction for this closeout; no `gpt-5.6-sol` sign-off is claimed.
+- Independent review status: **PENDING RE-REVIEW**. The prior `REQUEST_CHANGES` conclusion remains in force until an independent reviewer accepts the remediation and the outstanding controller success-path HIL; Builder does not self-certify a PASS.
 - Explicitly excluded from PSRH-042 functional delivery, but separately accepted by Human Lead on 2026-08-09: `c341e512600e673ca23fb73b377a4a8052d1b3a1` / `c341e51` (collaboration/governance documentation).
-- Final implementation commit: `b9dee960936e61b136ffb19598abd21ae9f456f2` — contains the timeout-cancellation fix and task-contract scope. This metadata follow-up records the clean-build evidence and final acceptance state for that implementation.
+- Final implementation commit: `2f5d58379360d759aa4c6ffd8c5574ff247c2cf5` — addresses the four independent-review findings: controller request lifetime, atomic FORCE_SYNC generation, explicit HIL/release build gate, and retry-safe HIL exit state.
 - New Fabric HIL follow-up commit: `5d2e356` — adds the opt-in five-minute NIGHT exit test variant and binds the sanitized HIL acceptance results recorded below.
-- Implementation paths in this closeout: `firmware/main/matter_app.cpp`, `firmware/main/matter_app.h`, `firmware/main/state_machine.c`, `firmware/main/state_machine.h`.
+- Implementation paths in this closeout: `firmware/main/CMakeLists.txt`, `firmware/main/matter_app.cpp`, `firmware/main/matter_app.h`, `firmware/main/state_machine.c`, `firmware/main/state_machine.h`.
 - Delivery metadata paths explicitly requested by Human Lead: `agent/tasks/PSRH-042.yml`, this handoff, `tests/evidence/PSRH-042_matter_delta_acceptance_20260808.md`, and `docs/session-summary-20260808.md`.
 
 The implementation fixes the locked SDK's asynchronous boundary without changing
@@ -34,6 +34,8 @@ committed.
 | Check | Exact command/result | Evidence or limitation |
 |---|---|---|
 | Diff hygiene | `git diff --check` — PASS | Re-run immediately before each commit. |
+| Frozen remediation production build | `ninja -C firmware/build -j2` — exit `0` | Tested image SHA-256: BIN `18571c257c0c4e459f4c92d6c7133fb6bd64abd155eec935749f0524f4f881ca`; ELF `74220b7982eca8707304e23e7cd298a950afc71e47778a0461f0295924924b67`; app image size `0x1d1120`. |
+| Frozen remediation host tests | `make -C tests/host BUILD=/tmp/psrh-042-review-fix-host -j2 all` — `127/127 PASS` | This host suite does not replace the required physical controller success-path HIL. |
 | Current HEAD production build | `HEAD=f8e5f9a`; environment loaded; `unset PSRH_HIL_NIGHT_EXIT_AFTER_MS; ninja -C firmware/build -j2` — exit `0` | Log SHA-256: `dd482e21dd055a5f8d7718c1aa108eb7850c50a6597f9a288651c1553606b574`; BIN `f44143e76e5d58507bcf9d363580a8846fa198d6f57e5eac96b02afb9c897bbf`; ELF `5115aff32c50875b29442a7193090e3790d02171339da889fff6240985c6e239`; app image size `0x1d1100` bytes. |
 | Clean ESP32-C6 build | External fresh source/build from `b9dee96`; `ninja -C build -j2` — `1497/1497`, exit `0` | Persistent source/build root: `/home/administrator/Project/PrivacySense-Matter-Room-Hub-artifacts/psrh-042-matter-v15/20260808/clean-build-b9dee96/`; build log hash: `53eb016ccf37229fbdf47ff8ebe9a1cc7122e540abbb2e50e68c332524ad2f46`. |
 | Clean size | `idf.py -B build size` — exit `0` | Persistent size log hash: `a14be98d8b5757ba0da7a026597c5a0a5c9842e542edf538f68b9b915e6e2a90`. |
@@ -83,12 +85,13 @@ does not compile on the locked SDK. Its persistent failure-log hash is
 | T09/T10/T12 | **PASS — prior evidence, not rerun** | Explicitly excluded from this closeout rerun. |
 | T15 commissioning | **PASS — historical summary only** | Previous session recorded success; the original `/tmp` log is gone and T15 was not rerun. |
 | T16 short test | **PASS — new Fabric HIL** | Same persistent storage read `CurrentMode 0 → 1 → 0`. |
+| Controller `ChangeToMode(1) → ChangeToMode(0)` success path | **DEFERRED** | The production-firmware HIL must be run outside the configured NIGHT window. Physical-button T16 is not a substitute; no Builder PASS is claimed. |
 | NIGHT `ChangeToMode(2)` guard | **PASS — new Fabric HIL** | Controller request outside the window failed with sanitized `0x0000002F`. |
 | T17 | **PARTIAL — new Fabric HIL** | Five-minute HIL variant captured automatic exit and post-exit `CurrentMode=0`; automatic entry was not separately captured. |
 | T19 | **PARTIAL — new Fabric HIL** | Offline `NORMAL→QUIET` was captured; after AP restore `_matter._tcp` was not discovered and latest-value read timed out. |
 | Controller restart with same storage | **PASS — new Fabric HIL** | Independent chip-tool processes reused persistent storage and re-established CASE. |
 | Device restart CASE/EP reads | **PARTIAL — new Fabric HIL** | Ordinary restart restored CASE and EP2 read; post-restart EP1/EP2 pair was not both retained. |
-| P1 independent review | **SKIPPED** | Explicitly skipped by Human Lead instruction; this handoff contains no independent Reviewer sign-off. |
+| P1 independent review | **PENDING RE-REVIEW** | Historical conclusion is `REQUEST_CHANGES`; final status awaits independent review of `2f5d583`, the frozen production image, and controller success-path HIL evidence. |
 
 ## Evidence retention and safety
 
@@ -100,7 +103,8 @@ does not compile on the locked SDK. Its persistent failure-log hash is
 
 ## Handoff condition
 
-The branch is deliverable only after the final verification build, size delta,
-`git diff --check`, tests, implementation commit hash, and clean-worktree result
-are inserted here and confirmed by `git status --short`. The metadata-only
-follow-up commit that records this handoff is reported separately with delivery.
+The branch cannot enter `READY_TO_MERGE` until the production-firmware controller
+`ChangeToMode(1) → ChangeToMode(0)` success-path HIL is recorded outside the
+NIGHT window, this handoff is updated with sanitized evidence, and an independent
+Reviewer provides a final conclusion. Human Lead must then separately accept any
+remaining PARTIAL items before integration.

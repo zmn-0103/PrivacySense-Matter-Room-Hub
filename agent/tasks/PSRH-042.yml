@@ -16,6 +16,8 @@ review_scope:
     - "587243575138a3983c6658c4eb991d89ffa1de2f"
     - "5d2e356312b998b3f22a3f6b4855b49632756e51"
     - "6f498dffdd38eeaea257b9e6f23597bb2b45731b"
+    - "2f5d58379360d759aa4c6ffd8c5574ff247c2cf5"
+    - "560734bd254ac1953327149a787b5525c3229648"
   excluded_commits:
     - commit: "c341e512600e673ca23fb73b377a4a8052d1b3a1"
       reason: "Separately synchronized collaboration/governance documentation; not PSRH-042 functional delivery."
@@ -98,6 +100,7 @@ new_fabric_hil_verification:
     NIGHT_protection: "PASS — window-outside ChangeToMode(2) rejected with sanitized 0x0000002F"
     T17: "PARTIAL — accelerated automatic exit captured; automatic entry not separately captured"
     T19: "PARTIAL — offline local NORMAL -> QUIET captured; post-recovery latest-value read not verified because operational mDNS was not rediscovered"
+    controller_change_to_mode_success_path: "DEFERRED — production-firmware controller 0 -> 1 -> 0 path requires a non-NIGHT-window HIL run; it is not substituted by the physical-button T16 result"
   recovery:
     controller_restart_same_storage: "PASS — independent chip-tool processes reused the persistent storage and re-established CASE"
     device_restart_case_ep_reads: "PARTIAL — ordinary restart restored CASE and EP2 read; post-restart EP1/EP2 pair not both retained"
