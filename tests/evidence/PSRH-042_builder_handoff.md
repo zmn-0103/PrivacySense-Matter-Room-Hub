@@ -10,6 +10,7 @@
 - Independent review status: **SKIPPED** per Human Lead instruction for this closeout; no `gpt-5.6-sol` sign-off is claimed.
 - Explicitly excluded from PSRH-042 functional delivery: `c341e512600e673ca23fb73b377a4a8052d1b3a1` / `c341e51` (separately synchronized collaboration/governance documentation).
 - Final implementation commit: `b9dee960936e61b136ffb19598abd21ae9f456f2` — contains the timeout-cancellation fix and task-contract scope. This metadata follow-up records the clean-build evidence and final acceptance state for that implementation.
+- New Fabric HIL follow-up commit: `5d2e356` — adds the opt-in five-minute NIGHT exit test variant and binds the sanitized HIL acceptance results recorded below.
 - Implementation paths in this closeout: `firmware/main/matter_app.cpp`, `firmware/main/matter_app.h`, `firmware/main/state_machine.c`, `firmware/main/state_machine.h`.
 - Delivery metadata paths explicitly requested by Human Lead: `agent/tasks/PSRH-042.yml`, this handoff, `tests/evidence/PSRH-042_matter_delta_acceptance_20260808.md`, and `docs/session-summary-20260808.md`.
 
