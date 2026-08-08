@@ -700,6 +700,12 @@ static void respond_matter_command(const matter_command_t *cmd, bool success)
     }
 }
 
+static bool matter_command_is_cancelled(const matter_command_t *cmd)
+{
+    return cmd == NULL ||
+           matter_app_change_to_mode_is_cancelled(cmd->resp_handle);
+}
+
 static void process_matter_command(const matter_command_t *cmd,
                                    const ps_config_t *cfg)
 {
@@ -711,6 +717,12 @@ static void process_matter_command(const matter_command_t *cmd,
 
     if (cmd->type != MATTER_COMMAND_CHANGE_TO_MODE) {
         ESP_LOGW(TAG, "unknown matter command type %d", (int)cmd->type);
+        respond_matter_command(cmd, false);
+        return;
+    }
+
+    if (matter_command_is_cancelled(cmd)) {
+        ESP_LOGW(TAG, "MATTER ChangeToMode: queued request was cancelled");
         respond_matter_command(cmd, false);
         return;
     }
@@ -741,6 +753,12 @@ static void process_matter_command(const matter_command_t *cmd,
         return;
     }
 
+    if (matter_command_is_cancelled(cmd)) {
+        ESP_LOGW(TAG, "MATTER ChangeToMode: cancelled after snapshot");
+        respond_matter_command(cmd, false);
+        return;
+    }
+
     user_mode_t target = (user_mode_t)new_mode;
     user_mode_t old_mode = st.user_mode;
 
@@ -752,9 +770,28 @@ static void process_matter_command(const matter_command_t *cmd,
     st.user_mode    = target;
     st.quiet_active = false;   // direct set, not a toggle
 
-    if (room_state_update(&st) != ESP_OK) {
-        ESP_LOGE(TAG, "MATTER ChangeToMode: update failed");
+    // Claim the final commit section immediately before the single writer
+    // mutation. If the caller timed out first, begin fails and no local state
+    // change is allowed. On success, the helper holds the request mutex until
+    // it signals the controller with the result below.
+    esp_err_t commit_begin = matter_app_begin_change_to_mode_commit(cmd->resp_handle);
+    if (commit_begin != ESP_OK) {
+        ESP_LOGW(TAG, "MATTER ChangeToMode: commit cancelled/unavailable: %s",
+                 esp_err_to_name(commit_begin));
         respond_matter_command(cmd, false);
+        return;
+    }
+
+    esp_err_t update_ret = room_state_update(&st);
+    esp_err_t response_ret = matter_app_end_change_to_mode_commit(
+        cmd->resp_handle, update_ret == ESP_OK);
+    if (response_ret != ESP_OK) {
+        ESP_LOGE(TAG, "MATTER ChangeToMode: commit response failed: %s",
+                 esp_err_to_name(response_ret));
+    }
+
+    if (update_ret != ESP_OK) {
+        ESP_LOGE(TAG, "MATTER ChangeToMode: update failed");
         return;
     }
 
@@ -769,7 +806,6 @@ static void process_matter_command(const matter_command_t *cmd,
     // arms the generation-based FORCE_SYNC retry path instead.
     (void)push_matter_report(MATTER_REPORT_CURRENT_MODE,
                              st.occupancy, st.user_mode);
-    respond_matter_command(cmd, true);
 }
 
 // Phase 2: NIGHT window evaluation via the pure-logic night_window_sm.

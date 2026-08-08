@@ -83,6 +83,20 @@ void matter_adapter_task(void *pvParameters);
 // esp_matter from the state_machine_task context.
 esp_err_t matter_app_respond_change_to_mode(void *cmd_ctx, bool success);
 
+// Returns true when a queued ChangeToMode request is cancelled, completed, or
+// does not carry the private response handle. The state machine must check
+// this before any local mutation. The check fails closed if the request mutex
+// is unavailable.
+bool matter_app_change_to_mode_is_cancelled(void *cmd_ctx);
+
+// Claim and release the final local-state commit section. The begin call
+// retains the private request mutex; the end call must be made on every
+// successful begin and signals the controller waiter with the commit result.
+// Holding this short section makes timeout cancellation mutually exclusive
+// with room_state_update().
+esp_err_t matter_app_begin_change_to_mode_commit(void *cmd_ctx);
+esp_err_t matter_app_end_change_to_mode_commit(void *cmd_ctx, bool success);
+
 // --- Factory reset (Phase 3 Step 4) ---
 // Scheduled by state_machine_task after a confirmed long-press.
 // Erases the default NVS partition (Wi-Fi/Matter/BLE credentials),

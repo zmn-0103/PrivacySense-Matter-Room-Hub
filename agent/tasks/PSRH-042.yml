@@ -28,6 +28,13 @@ delivery_scope:
     - "tests/evidence/PSRH-042_matter_delta_acceptance_20260808.md"
     - "docs/session-summary-20260808.md"
   approval: "Human Lead explicitly requested this implementation, task-contract, sanitized-evidence, handoff, and acceptance-summary closeout on 2026-08-08. The implementation owned paths remain limited to the four listed source/header files; metadata paths are delivery artifacts."
+  excluded_preexisting_history:
+    commit: "c341e51"
+    paths:
+      - "AGENTS.md"
+      - "agent/task_templates/task-contract.yml"
+      - "docs/multi-agent-development.md"
+    status: "OUTSIDE PSRH-042 delivery scope; separate Human Lead acceptance or an authorized history split is required before merging the full branch."
 read_only_paths:
   - "docs/interfaces/**"
   - "docs/matter-data-model.md"

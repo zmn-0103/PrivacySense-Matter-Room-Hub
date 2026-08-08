@@ -103,7 +103,9 @@ static uint16_t s_ep2_id = 0;
 // request to state_machine_task and waits on this private, static response
 // slot before returning Success to the SDK. The slot is static rather than
 // stack-owned so a late state-machine response after the bounded wait cannot
-// dereference a dead CHIP callback frame.
+// dereference a dead CHIP callback frame. A timed-out slot is marked
+// cancelled and remains in use until the queued state-machine event observes
+// that mark; it is never recycled while a late event can still arrive.
 typedef struct {
     StaticSemaphore_t completion_storage;
     SemaphoreHandle_t completion;
@@ -111,6 +113,7 @@ typedef struct {
     bool              caller_waiting;
     bool              completed;
     bool              success;
+    bool              cancelled;
 } matter_mode_request_t;
 
 static matter_mode_request_t s_matter_mode_request = {};
@@ -535,6 +538,91 @@ esp_err_t matter_app_respond_change_to_mode(void *cmd_ctx, bool success)
         return ESP_ERR_INVALID_STATE;
     }
 
+    // A timed-out caller has already received Failure. Never allow a late
+    // state-machine response to turn that request back into Success.
+    if (s_matter_mode_request.cancelled) {
+        success = false;
+    }
+    s_matter_mode_request.success = success;
+    s_matter_mode_request.completed = true;
+    bool release_slot = !s_matter_mode_request.caller_waiting;
+    if (release_slot) {
+        s_matter_mode_request.in_use = false;
+    }
+
+    BaseType_t give_ret = xSemaphoreGive(s_matter_mode_request.completion);
+    xSemaphoreGive(s_matter_command_mutex);
+    return give_ret == pdTRUE ? ESP_OK : ESP_FAIL;
+}
+
+bool matter_app_change_to_mode_is_cancelled(void *cmd_ctx)
+{
+    if (cmd_ctx != &s_matter_mode_request ||
+        s_matter_command_mutex == nullptr ||
+        s_matter_mode_request.completion == nullptr) {
+        // Fail closed for an event that does not carry the private request
+        // handle. Such an event must never mutate local mode state.
+        return true;
+    }
+
+    if (xSemaphoreTake(s_matter_command_mutex, 0) != pdTRUE) {
+        // The caller may be marking the request cancelled, or the commit
+        // section may be deciding the request. Do not mutate while ownership
+        // is unknown; the blocking response path will reconcile the slot.
+        return true;
+    }
+
+    bool cancelled = !s_matter_mode_request.in_use ||
+                     s_matter_mode_request.completed ||
+                     s_matter_mode_request.cancelled;
+    xSemaphoreGive(s_matter_command_mutex);
+    return cancelled;
+}
+
+// Claim the final commit section. The mutex remains held across the single
+// room_state_update() call in state_machine_task. This makes timeout
+// cancellation and the state mutation mutually exclusive: either cancellation
+// wins before this function, or the caller waits for the committed response.
+esp_err_t matter_app_begin_change_to_mode_commit(void *cmd_ctx)
+{
+    if (cmd_ctx != &s_matter_mode_request ||
+        s_matter_command_mutex == nullptr ||
+        s_matter_mode_request.completion == nullptr) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (xSemaphoreTake(s_matter_command_mutex, portMAX_DELAY) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+
+    if (!s_matter_mode_request.in_use ||
+        s_matter_mode_request.completed ||
+        s_matter_mode_request.cancelled) {
+        xSemaphoreGive(s_matter_command_mutex);
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    // The mutex is deliberately held until
+    // matter_app_end_change_to_mode_commit() signals the waiter.
+    return ESP_OK;
+}
+
+esp_err_t matter_app_end_change_to_mode_commit(void *cmd_ctx, bool success)
+{
+    if (cmd_ctx != &s_matter_mode_request ||
+        s_matter_command_mutex == nullptr ||
+        s_matter_mode_request.completion == nullptr) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (!s_matter_mode_request.in_use || s_matter_mode_request.completed) {
+        xSemaphoreGive(s_matter_command_mutex);
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (s_matter_mode_request.cancelled) {
+        success = false;
+    }
     s_matter_mode_request.success = success;
     s_matter_mode_request.completed = true;
     bool release_slot = !s_matter_mode_request.caller_waiting;
@@ -574,6 +662,7 @@ static esp_err_t matter_app_request_change_to_mode(uint8_t new_mode)
     s_matter_mode_request.caller_waiting = true;
     s_matter_mode_request.completed = false;
     s_matter_mode_request.success = false;
+    s_matter_mode_request.cancelled = false;
 
     app_event_t ev = {};
     ev.type = EVENT_MATTER_COMMAND;
@@ -586,6 +675,7 @@ static esp_err_t matter_app_request_change_to_mode(uint8_t new_mode)
         s_matter_mode_request.in_use = false;
         s_matter_mode_request.caller_waiting = false;
         s_matter_mode_request.completed = false;
+        s_matter_mode_request.cancelled = false;
         xSemaphoreGive(s_matter_command_mutex);
         return ESP_ERR_NO_MEM;
     }
@@ -602,13 +692,22 @@ static esp_err_t matter_app_request_change_to_mode(uint8_t new_mode)
 
     bool completed = s_matter_mode_request.completed;
     bool success = s_matter_mode_request.success;
-    s_matter_mode_request.caller_waiting = false;
+    bool timed_out = response_received != pdTRUE && !completed;
+    if (timed_out) {
+        // Keep in_use=true until the state-machine event consumes the
+        // cancellation and calls matter_app_respond_change_to_mode(). This
+        // prevents request-slot reuse while the stale queue item is alive.
+        s_matter_mode_request.cancelled = true;
+        s_matter_mode_request.caller_waiting = false;
+    } else {
+        s_matter_mode_request.caller_waiting = false;
+    }
     if (completed) {
         s_matter_mode_request.in_use = false;
     }
     xSemaphoreGive(s_matter_command_mutex);
 
-    if (response_received != pdTRUE && !completed) {
+    if (timed_out) {
         ESP_LOGE(TAG, "ChangeToMode response timed out after %u ms",
                  MATTER_COMMAND_RESPONSE_TIMEOUT_MS);
         return ESP_ERR_TIMEOUT;

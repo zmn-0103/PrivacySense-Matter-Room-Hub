@@ -27,7 +27,7 @@ FORCE_SYNC retry requests when a report fails.
 | Current image | BIN/ELF SHA-256 recorded below | Build outputs stay outside Git. |
 | Formal baseline build | Independent temporary source tree from `02e67aa`, `ninja -C build -j2` — exit `1` | The formal baseline still uses the pre-ESP-Matter-1.5 `ModeOptionStruct` API and fails before linking; its log is retained outside the repository. No false baseline delta is claimed. |
 | Pre-closeout comparison | Independent temporary source tree from `f6e9b6c`, `ninja -C build -j2` — `1497/1497`, exit `0` | Nearest compatible reference for the reviewer fix; persistent log hash: `afb5e58120b3d8c904243a14946d52808c5e7e7425f2699ea9fc198df8cb9547`. It is not substituted for the formal baseline. |
-| Host/component tests | Current host suite `129/129 PASS`; historical full suite `178/178 PASS` | Final current log hash: `33de1b8f1d7430d45c8c04d2826df912e58f0e8aa3cf2758a559cea457d783e6`. The 178-count result is historical evidence and was not rerun in this closeout. |
+| Host/component tests | Current host suite `127/127 PASS` (17+20+10+21+25+34); historical full suite `178/178 PASS` | Final current log is hash-bound below. The 178-count result is historical evidence and was not rerun in this closeout. The host suite does not cover Matter timeout, late-event cancellation, or request-slot reuse. |
 | Runtime stack evidence | Previous flashed image telemetry: radar 1980 B, UI 1156 B, state machine 4128 B, network 6256 B, env sensor 2192 B | No Matter-adapter high-water mark was captured; these values are not a post-patch HIL measurement. |
 | Controller HIL | **DEFERRED** | `/dev/ttyUSB0` is present, but no existing chip-tool Fabric storage was found. No empty storage or new commissioning was used. |
 
@@ -79,7 +79,7 @@ does not compile on the locked SDK. Its persistent failure-log hash is
 - Persistent build, size, host-test, and historical serial artifacts are stored outside the repository at `/home/administrator/Project/PrivacySense-Matter-Room-Hub-artifacts/psrh-042-matter-v15/20260808/closeout/`; the final build/size/test hashes are recorded above. A persistent serial-observation artifact there has SHA-256 `91d67b46637f067eed253146ba1b2c22254cb0fb31145ce0c53e0a8b7c555029`. It contains only heartbeat telemetry and is not T14/T15/T16/T05/T19 proof.
 - Raw controller logs, Fabric storage, credentials, setup payloads, MAC addresses, and complete IPv6 addresses are not committed.
 - No `idf.py flash`, `erase-flash`, NVS erase, factory reset, commissioning, or re-commissioning was performed in this closeout.
-- Other branches were inspected read-only and not modified. Pre-existing collaboration/documentation commits on this branch are retained; this closeout adds only the approved implementation and delivery artifacts listed above.
+- Other branches were inspected read-only and not modified. Pre-existing collaboration/documentation commit `c341e51` changes `AGENTS.md`, `agent/task_templates/task-contract.yml`, and `docs/multi-agent-development.md`; it is outside PSRH-042 delivery scope. No history rewrite was performed. The full branch requires separate Human Lead acceptance of that governance commit or an authorized split before merge.
 
 ## Handoff condition
 
