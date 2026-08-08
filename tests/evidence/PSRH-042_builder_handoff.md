@@ -5,7 +5,7 @@
 - Task contract: [`agent/tasks/PSRH-042.yml`](../../agent/tasks/PSRH-042.yml)
 - Baseline commit: `02e67aa5216529ca83bff32bbf46ac1a8972e48d`
 - Branch/worktree: `agent/psrh-042-matter-v15` / `PrivacySense-Matter-Room-Hub-worktrees/psrh-042-matter-v15`
-- Final implementation/evidence commit: to be inserted after the verification commit; it will be the hash binding this evidence to the source changes.
+- Final implementation/evidence commit: `2392a3b54564fcc270faa54d98bbdc7e3d923298` — contains the reviewed firmware fix, task-contract scope, acceptance summary, and verified evidence record below.
 - Implementation paths in this closeout: `firmware/main/matter_app.cpp`, `firmware/main/matter_app.h`, `firmware/main/state_machine.c`, `firmware/main/state_machine.h`.
 - Delivery metadata paths explicitly requested by Human Lead: `agent/tasks/PSRH-042.yml`, this handoff, `tests/evidence/PSRH-042_matter_delta_acceptance_20260808.md`, and `docs/session-summary-20260808.md`.
 
