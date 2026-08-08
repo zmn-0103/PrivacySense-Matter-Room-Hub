@@ -80,6 +80,24 @@ acceptance:
   - "The explicitly approved Radar FeatureMap is compatible with the locked SDK and is the only Matter data-model delta; the approved occupancy value mapping and local UNKNOWN/offline behavior remain intact."
   - "Build, size, host/static test, and any deferred hardware evidence are recorded against the task commit and toolchain."
 
+new_fabric_hil_verification:
+  result_label: "新 Fabric HIL"
+  storage_path: "/home/administrator/Project/PrivacySense-Matter-Room-Hub-artifacts/psrh-042-matter-v15/20260808/new-fabric-hil/controller-storage"
+  storage_manifest_sha256: "22711e42d0da1c19496e4c78205ffdf6d963c3c91b28120f448c409461d0220b"
+  firmware_variant: "PSRH_HIL_NIGHT_EXIT_AFTER_MS=300000"
+  restricted_build: "ninja -C <external-hil-build-dir> -j2"
+  results:
+    T14: "PARTIAL — operational CASE/reads PASS; original PASE/NOC success chain not retained"
+    T05: "PASS — Occupancy reads 1 -> 1 -> 1 across radar disconnect/recovery"
+    T16: "PASS — CurrentMode 0 -> 1 -> 0 after short presses"
+    NIGHT_protection: "PASS — window-outside ChangeToMode(2) rejected with sanitized 0x0000002F"
+    T17: "PARTIAL — accelerated automatic exit captured; automatic entry not separately captured"
+    T19: "PARTIAL — offline local NORMAL -> QUIET captured; post-recovery latest-value read not verified because operational mDNS was not rediscovered"
+  recovery:
+    controller_restart_same_storage: "PASS — independent chip-tool processes reused the persistent storage and re-established CASE"
+    device_restart_case_ep_reads: "PARTIAL — ordinary restart restored CASE and EP2 read; post-restart EP1/EP2 pair not both retained"
+    recommissioning: "DEFERRED — no further NVS/Fabric clearing was necessary"
+
 required_evidence:
   - "builder_handoff"
   - "build_result"

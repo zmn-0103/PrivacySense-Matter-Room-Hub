@@ -26,6 +26,13 @@ static const char *TAG = "state_machine";
 #define STATE_MACHINE_QUEUE_TIMEOUT_MS 1000U
 #define CONFIG_REREAD_INTERVAL_S    60U
 
+// Production builds leave this at zero. HIL builds can define it through
+// PSRH_HIL_NIGHT_EXIT_AFTER_MS to exercise automatic NIGHT exit without
+// changing the persisted 22:00–07:00 wall-clock configuration.
+#ifndef PSRH_HIL_NIGHT_EXIT_AFTER_MS
+#define PSRH_HIL_NIGHT_EXIT_AFTER_MS 0U
+#endif
+
 static uint32_t s_radar_timeout_ms = 10000;
 
 static uint32_t s_radar_watch_start_ms = 0;
@@ -46,6 +53,12 @@ static uint32_t s_exit_delay_ms = 120000;
 static env_alert_sm_t     s_env_alert_sm;
 static env_alert_config_t s_env_alert_cfg;
 static night_window_config_t s_night_cfg;
+
+#if PSRH_HIL_NIGHT_EXIT_AFTER_MS > 0U
+static uint32_t s_hil_night_enter_ms = 0U;
+static bool     s_hil_night_timer_armed = false;
+static bool     s_hil_night_hold_until_window_exit = false;
+#endif
 
 // Monotonic request generation shared with matter_adapter_task. The adapter
 // increments it when an attribute report fails; state_machine_task consumes a
@@ -826,7 +839,9 @@ static void process_matter_command(const matter_command_t *cmd,
 // next loop.
 static void evaluate_night_window(uint32_t now_ms, const ps_config_t *cfg)
 {
+#if PSRH_HIL_NIGHT_EXIT_AFTER_MS == 0U
     (void)now_ms;
+#endif
 
     room_state_t st;
     if (room_state_snapshot(&st) != ESP_OK) {
@@ -845,7 +860,50 @@ static void evaluate_night_window(uint32_t now_ms, const ps_config_t *cfg)
         .night_end_min   = cfg->night_end_min,
     };
 
-    if (!night_window_sm_eval(&nws, &t, &nwc)) return;
+    bool changed = false;
+
+#if PSRH_HIL_NIGHT_EXIT_AFTER_MS > 0U
+    if (t.time_valid && s_hil_night_hold_until_window_exit) {
+        // After the accelerated HIL exit, suppress immediate re-entry while
+        // the real wall-clock NIGHT window is still active. Clear the hold
+        // once the real window ends so normal production semantics resume.
+        night_window_sm_state_t probe = {
+            .user_mode      = NIGHT_WINDOW_MODE_NORMAL,
+            .pre_night_mode = NIGHT_WINDOW_MODE_NORMAL,
+            .quiet_active   = false,
+        };
+        if (!night_window_sm_eval(&probe, &t, &nwc)) {
+            s_hil_night_hold_until_window_exit = false;
+        } else {
+            return;
+        }
+    }
+
+    if (t.time_valid && st.user_mode == MODE_NIGHT &&
+        !s_hil_night_timer_armed && !s_hil_night_hold_until_window_exit) {
+        s_hil_night_enter_ms = now_ms;
+        s_hil_night_timer_armed = true;
+        ESP_LOGI(TAG, "HIL NIGHT exit timer armed: %u ms",
+                 (unsigned)PSRH_HIL_NIGHT_EXIT_AFTER_MS);
+    }
+
+    if (t.time_valid && st.user_mode == MODE_NIGHT &&
+        s_hil_night_timer_armed &&
+        (uint32_t)(now_ms - s_hil_night_enter_ms) >=
+            (uint32_t)PSRH_HIL_NIGHT_EXIT_AFTER_MS) {
+        nws.user_mode = nws.pre_night_mode;
+        changed = true;
+        s_hil_night_timer_armed = false;
+        s_hil_night_hold_until_window_exit = true;
+        ESP_LOGI(TAG, "HIL NIGHT timed exit after %u ms",
+                 (unsigned)PSRH_HIL_NIGHT_EXIT_AFTER_MS);
+    }
+#endif
+
+    if (!changed) {
+        changed = night_window_sm_eval(&nws, &t, &nwc);
+    }
+    if (!changed) return;
 
     // State changed: write back. quiet_active is unchanged by the pure
     // function; copy through to keep room_state consistent.
@@ -853,6 +911,15 @@ static void evaluate_night_window(uint32_t now_ms, const ps_config_t *cfg)
     st.user_mode      = (user_mode_t)nws.user_mode;
     st.pre_night_mode = (user_mode_t)nws.pre_night_mode;
     st.quiet_active   = nws.quiet_active;
+
+#if PSRH_HIL_NIGHT_EXIT_AFTER_MS > 0U
+    if (t.time_valid && prev_mode != MODE_NIGHT && st.user_mode == MODE_NIGHT) {
+        s_hil_night_enter_ms = now_ms;
+        s_hil_night_timer_armed = true;
+        ESP_LOGI(TAG, "HIL NIGHT exit timer armed: %u ms",
+                 (unsigned)PSRH_HIL_NIGHT_EXIT_AFTER_MS);
+    }
+#endif
 
     if (room_state_update(&st) != ESP_OK) {
         ESP_LOGE(TAG, "evaluate_night_window: update failed");

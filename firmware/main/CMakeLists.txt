@@ -38,3 +38,14 @@ idf_component_register(
         ld2410c
         env_sensor
 )
+
+# Optional HIL-only timing override. The default build keeps the production
+# NIGHT window semantics (22:00–07:00). A separate HIL build may set
+# PSRH_HIL_NIGHT_EXIT_AFTER_MS in the environment to exercise the automatic
+# exit path without waiting for the real wall-clock boundary.
+if(DEFINED ENV{PSRH_HIL_NIGHT_EXIT_AFTER_MS} AND
+   NOT "$ENV{PSRH_HIL_NIGHT_EXIT_AFTER_MS}" STREQUAL "")
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE
+        PSRH_HIL_NIGHT_EXIT_AFTER_MS=$ENV{PSRH_HIL_NIGHT_EXIT_AFTER_MS})
+    message(STATUS "HIL NIGHT exit override: $ENV{PSRH_HIL_NIGHT_EXIT_AFTER_MS} ms")
+endif()

@@ -1,33 +1,40 @@
 # PSRH-042 Matter 增量验收摘要
 
-日期：2026-08-08
-范围：仅记录本轮新增的真实 Matter 控制器结果；阶段 1、阶段 2、W01，以及既有本地/Wi‑Fi 证据均不重做。
+日期：2026-08-08—2026-08-09
+范围：本轮结果统一标记为**新 Fabric HIL**；不替代、覆盖或伪装为昨天既有 Fabric 的恢复证据。
 
-## 结果
+## 新 Fabric HIL 结果
 
-| 项目 | 新增结果 | 脱敏证据摘要 |
+本轮使用持久 controller storage：
+`/home/administrator/Project/PrivacySense-Matter-Room-Hub-artifacts/psrh-042-matter-v15/20260808/new-fabric-hil/controller-storage`。
+
+closeout storage manifest snapshot SHA-256：`22711e42d0da1c19496e4c78205ffdf6d963c3c91b28120f448c409461d0220b`。
+
+| 项目 | 结果 | 脱敏证据边界 |
 |---|---|---|
-| T14 首次 BLE 配网 | **PASS（历史摘要，原始日志不可恢复）** | 上一会话摘要记录 BLE 配对、PASE、Wi‑Fi 凭据注入、NOC、CASE、Operational IPv6/mDNS 发现和 commissioning complete 成功；本次未重跑。 |
-| T14 后 Endpoint 可达性 | **PASS（历史摘要，原始控制器存储不可恢复）** | 上一会话摘要记录 EP1 `Occupancy=1`；EP2 `SupportedModes` 为 `Normal=0`、`Quiet=1`、`Night=2`；EP2 `CurrentMode=2`。 |
-| T05 Matter 子项 | **PARTIAL** | 只有雷达恢复后的 EP1 `Occupancy=1` 读取；缺少断线前、断线期间、恢复后三个 Matter 读取点。 |
-| T09 Matter 恢复/同步 | **PASS** | 路由器恢复后重新完成 operational discovery 和 CASE，EP1 `Occupancy=1`、EP2 `CurrentMode=2`。 |
-| T10 Matter 控制器恢复 | **PASS** | 独立 `chip-tool` 进程重新初始化控制器、恢复 Fabric、完成 CASE 后读取 EP1/EP2；未重复本地/Wi‑Fi部分。 |
-| T12 Matter 恢复/同步 | **PASS** | 设备断电重启并重新挂载后，控制器通过 Operational IPv6/CASE 读取 EP1 `Occupancy=1`、EP2 `CurrentMode=2`。 |
-| T15 恢复出厂后重新配网 | **PASS（历史摘要，原始日志不可恢复）** | 上一会话摘要记录 Pairing/PASE、NOC/CASE、Operational discovery 和 commissioning complete 成功及后续读取；本次不重跑。 |
-| T19 Matter | **PARTIAL（恢复后可读；同步未充分验证）** | 仅有恢复后的 Matter 读取摘要；没有实际断网期间改变本地状态、恢复后读取最新值的闭环。 |
+| T14 BLE 配网与 Operational | **PARTIAL** | 新 Fabric storage 持久化；Operational Discovery、CASE、EP1/EP2 读取成功。PASE/NOC 原始成功链未保留，不能把整体标为 PASS。 |
+| T05 Occupancy | **PASS** | 雷达断线前、断线中、恢复后三次 EP1 读取为 `1 → 1 → 1`。 |
+| T16 短按模式切换 | **PASS** | 同一新 Fabric storage 读取 `CurrentMode 0 → 1 → 0`。 |
+| NIGHT 防护 | **PASS** | 窗口外控制器 `ChangeToMode(2)` 被拒绝；脱敏错误码 `0x0000002F`。 |
+| T17 NIGHT 自动转换 | **PARTIAL** | 5 分钟 HIL 变体直接捕获自动退出 `NIGHT → NORMAL`，退出后读取 `CurrentMode=0`；未单独捕获本轮变体的 `NORMAL → NIGHT` 自动进入。 |
+| T19 离线本地状态同步 | **PARTIAL** | 离线时串口确认 `NORMAL→QUIET`；AP 恢复后本轮未重新发现 `_matter._tcp`，控制器最新值读取超时。 |
+| 控制器重启恢复 | **PASS** | 多次独立 chip-tool 进程使用同一持久 storage 恢复 Fabric，并完成 CASE/读取。 |
+| 设备重启后 CASE/读取 | **PARTIAL** | 普通重启（未擦 NVS、未重新 commissioning）后 CASE 与 EP2 读取成功；本次重启后的 EP1/EP2 双端点读取未同时保留。 |
+| 重新 commissioning | **DEFERRED** | 本轮无必要，不重复清除 NVS/Fabric。 |
+
+## 既有 Fabric 结果边界
+
+T09/T10/T12/T15 的历史结果保持原记录，不作为本轮新 Fabric HIL 证据，也不与本轮结果合并计数。历史 T14/T15 原始 `/tmp` 日志已不可恢复，本摘要不伪造哈希。
 
 ## 明确未声称的结果
 
-- T16 **DEFERRED**：没有既有 chip-tool Fabric 存储，未完成初始 `CurrentMode=0`、短按后 `1`、再次短按后 `0` 的控制器读取闭环。
-- NIGHT 防护 **DEFERRED**：未取得真实控制器对 `ChangeToMode(2)` 的失败响应；不能将代码/Host 证据写成 HIL PASS。
-- T17 按用户要求跳过；W01 只证明 SNTP 已同步，不证明 NIGHT 自动进入或退出。
-- T19/T14/T15 中出现的 `CurrentMode=2` 仅作为当时状态快照，不作为 T17 自动转换证据。
-- 上一会话的成功 commissioning 摘要和后续读取均未出现 `CHIP Error 0x00000046: No endpoint`；该历史摘要描述了 BLE → PASE → Wi‑Fi 凭据 → NOC → CASE → mDNS/IPv6 操作发现路径，本次没有重现它。
+- T14 不声称原始 PASE/NOC 链可审计；仅声称本轮保留的 operational CASE/读取结果。
+- T17 不把烧录后已有的 NIGHT 状态快照冒充自动进入证据。
+- T19 不把 AP 恢复动作冒充 Matter Operational Discovery 或最新值读取；本轮恢复读取因 mDNS 未发现而失败。
+- 普通设备重启不等同于断电重启；本轮未执行再次 commissioning。
 
-## 证据边界与引用
+## 证据与安全边界
 
-- T14/T15 原始控制器日志此前位于 `/tmp`，当前已不存在，无法复制或计算 SHA-256；本摘要不包含 Wi‑Fi 凭据、MAC、完整地址或原始日志。
-- 宿主未找到既有 `chip_tool_config*.ini`，未创建空 Fabric、未重新 commissioning。
-- 旧构建、烧录、启动、Host 测试和既有告警状态见 [PSRH-042 machine verification](PSRH-042_machine_verification_20260807.md)。
-- 旧会话契约、批准范围和历史证据见 [session summary](../../docs/session-summary-20260807.md)。
-- 既有 Wi‑Fi/SNTP 重连证据见 [W01 network reconnect acceptance](W01_network_reconnect_acceptance_20260721.md)。
+- 新 Fabric HIL 脱敏证据位于仓库外持久目录 `.../new-fabric-hil/sanitized-evidence/`。
+- 5 分钟 HIL 固件的编译定义为 `PSRH_HIL_NIGHT_EXIT_AFTER_MS=300000`；生产默认 NIGHT 窗口未改变。
+- 未在提交、日志或摘要中保存 setup payload、Wi-Fi 凭据、私钥、MAC、完整 IPv6、Fabric/Node 标识或原始控制器 storage。
