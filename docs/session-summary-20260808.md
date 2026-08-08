@@ -26,11 +26,11 @@
 ## 2. 构建与代码状态
 
 - 按用户要求限制并行任务为 `-j2`；文档命令为 `ninja -C firmware/build -j2`。
-- 正式基线 `02e67aa` 的独立构建退出码为 `1`：旧 `ModeOptionStruct` API 在锁定 ESP-Matter 1.5 上于链接前失败；该失败日志已复制到仓库外持久目录。为得到可比增量，收口前兼容快照 `f6e9b6c` 完成 `1497/1497`，当前工作树按文档命令 `ninja -C firmware/build -j2` 退出码为 `0`。
+- 正式基线 `02e67aa` 的独立构建退出码为 `1`：旧 `ModeOptionStruct` API 在锁定 ESP-Matter 1.5 上于链接前失败；该失败日志已复制到仓库外持久目录。为得到可比增量，收口前兼容快照 `f6e9b6c` 完成 `1497/1497`；本轮超时修正提交 `b9dee96` 的持久外部 clean 源树也完成 `1497/1497`，当前工作树按文档命令 `ninja -C firmware/build -j2` 退出码为 `0`。
 - `git diff --check` 已通过。
 - 本轮没有重新烧录；普通 flash 因此前置“不额外烧录”约束未获安全批准，当前板上运行镜像不是本轮修正后的镜像。
-- 本轮代码收口修改位于 `firmware/main/matter_app.cpp`、`firmware/main/matter_app.h`、`firmware/main/state_machine.c`、`firmware/main/state_machine.h`：ChangeToMode 在 SDK 写入前同步等待状态机提交/拒绝；NIGHT 由 SupportedModesManager 和状态机双重校验；本地 EP1/EP2 投影使用 `attribute::report()`；报告失败通过代际 FORCE_SYNC 重试；QUIET→NIGHT 保存实际进入前模式。
-- 资源结果：当前 Flash Code `1,751,112 B`、DIRAM `241,781 B`、LP SRAM `24 B`、BIN `1,904,000 B`；相对兼容参考 `f6e9b6c` 分别为 `+1,578 B`、`+200 B`、`+0 B`、`+1,584 B`。正式 `02e67aa` 因 API 不兼容无法给出数值增量。
+- 本轮代码收口修改位于 `firmware/main/matter_app.cpp`、`firmware/main/matter_app.h`、`firmware/main/state_machine.c`、`firmware/main/state_machine.h`：ChangeToMode 在 SDK 写入前同步等待状态机提交/拒绝；超时请求保持占用并在迟到事件处理前取消；NIGHT 由 SupportedModesManager 和状态机双重校验；本地 EP1/EP2 投影使用 `attribute::report()`；报告失败通过代际 FORCE_SYNC 重试；QUIET→NIGHT 保存实际进入前模式。
+- 资源结果：当前 clean BIN `1,904,896 B`、Flash Code `1,752,010 B`、DIRAM `241,781 B`、LP SRAM `24 B`；相对兼容参考 `f6e9b6c` 分别为 `+2,480 B`、`+2,476 B`、`+200 B`、`+0 B`。正式 `02e67aa` 因 API 不兼容无法给出数值增量。
 - 当前 Host 测试日志实际为 `127/127 PASS`（17+20+10+21+25+34）；历史完整组件计数 `178/178 PASS` 不在本轮重跑。该套件没有覆盖 Matter 请求超时、迟到事件取消或请求槽复用路径，不对此类路径宣称 Host PASS。
 - 既有项目告警仍保持记录，包括 CMake deprecation、未使用函数和上游告警；未将其误报为本轮新增问题。
 
@@ -123,7 +123,7 @@
 - T14/T15 原始日志此前保留在 `/tmp`，现已被清理；无法复制到持久目录或计算 SHA-256。未提交任何原始日志、Fabric 存储或敏感信息。
 - 宿主只读搜索未找到既有 `chip_tool_config*.ini`；未创建空存储、未重新 commissioning。
 - 本次非破坏性串口观察只记录运行心跳；持久副本位于 `/home/administrator/Project/PrivacySense-Matter-Room-Hub-artifacts/psrh-042-matter-v15/20260808/closeout/serial-observation-20260808.log`，SHA-256 为 `91d67b46637f067eed253146ba1b2c22254cb0fb31145ce0c53e0a8b7c555029`，不作为 T16/T05/T19 PASS 证据。
-- 当前构建、size、Host 测试、正式基线失败和兼容参考日志均直接保存在上述 `closeout/` 持久目录；没有新的日志依赖外部 `/tmp`。
+- 当前增量构建、clean build/size、Host 测试、正式基线失败和兼容参考日志均直接保存在 `.../20260808/` 持久目录（clean build 根目录为 `clean-build-b9dee96/`）；没有新的日志依赖外部 `/tmp`。
 - 分支历史中的 `c341e51` 仅修改 `AGENTS.md`、`agent/task_templates/task-contract.yml`、`docs/multi-agent-development.md`，不属于 PSRH-042 授权交付范围；未改写历史，整分支合并前需 Human Lead 单独接受或由有权限者拆分。
 - 没有执行 `idf.py flash`、`erase-flash`、NVS 擦除或重新 commissioning。
 - 当前文件的格式检查：`git diff --check` 通过。
