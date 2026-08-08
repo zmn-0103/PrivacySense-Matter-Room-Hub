@@ -3,8 +3,9 @@ task_id: "<PSRH-###>"
 title: "<short title>"
 status: "SPEC"
 goal: "<observable outcome>"
-owner: "<builder-ai identity>"
-reviewer: "Codex"
+builder_lead: "<Terra or human-designated equivalent>"
+owner: "<Luna or assigned builder identity>"
+reviewer: "<Sol or independent human-designated equivalent>"
 baseline_commit: "<full git commit>"
 
 owned_paths:
