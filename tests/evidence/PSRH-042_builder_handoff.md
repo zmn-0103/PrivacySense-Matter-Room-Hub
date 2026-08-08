@@ -5,6 +5,10 @@
 - Task contract: [`agent/tasks/PSRH-042.yml`](../../agent/tasks/PSRH-042.yml)
 - Baseline commit: `02e67aa5216529ca83bff32bbf46ac1a8972e48d`
 - Branch/worktree: `agent/psrh-042-matter-v15` / `PrivacySense-Matter-Room-Hub-worktrees/psrh-042-matter-v15`
+- Fixed independent review target: implementation commits `2392a3b54564fcc270faa54d98bbdc7e3d923298` and `b9dee960936e61b136ffb19598abd21ae9f456f2`, plus metadata commits `54014834049fb44e7f3564e40b334b438a3bd10c` and `587243575138a3983c6658c4eb991d89ffa1de2f`.
+- Roles: builder lead `gpt-5.6-terra`; builder `gpt-5.6-luna` with reasoning effort `max`; independent reviewer `gpt-5.6-sol`.
+- Independent review status: **SKIPPED** per Human Lead instruction for this closeout; no `gpt-5.6-sol` sign-off is claimed.
+- Explicitly excluded from PSRH-042 functional delivery: `c341e512600e673ca23fb73b377a4a8052d1b3a1` / `c341e51` (separately synchronized collaboration/governance documentation).
 - Final implementation commit: `b9dee960936e61b136ffb19598abd21ae9f456f2` — contains the timeout-cancellation fix and task-contract scope. This metadata follow-up records the clean-build evidence and final acceptance state for that implementation.
 - Implementation paths in this closeout: `firmware/main/matter_app.cpp`, `firmware/main/matter_app.h`, `firmware/main/state_machine.c`, `firmware/main/state_machine.h`.
 - Delivery metadata paths explicitly requested by Human Lead: `agent/tasks/PSRH-042.yml`, this handoff, `tests/evidence/PSRH-042_matter_delta_acceptance_20260808.md`, and `docs/session-summary-20260808.md`.
@@ -29,9 +33,9 @@ FORCE_SYNC retry requests when a report fails.
 | Current image | BIN/ELF SHA-256 recorded below | Clean external-build images; outputs stay outside Git. |
 | Formal baseline build | Independent temporary source tree from `02e67aa`, `ninja -C build -j2` — exit `1` | The formal baseline still uses the pre-ESP-Matter-1.5 `ModeOptionStruct` API and fails before linking; its log is retained outside the repository. No false baseline delta is claimed. |
 | Pre-closeout comparison | Independent temporary source tree from `f6e9b6c`, `ninja -C build -j2` — `1497/1497`, exit `0` | Nearest compatible reference for the reviewer fix; persistent log hash: `afb5e58120b3d8c904243a14946d52808c5e7e7425f2699ea9fc198df8cb9547`. It is not substituted for the formal baseline. |
-| Host/component tests | Current host suite `127/127 PASS` (17+20+10+21+25+34); historical full suite `178/178 PASS` | Current log hash: `33de1b8f1d7430d45c8c04d2826df912e58f0e8aa3cf2758a559cea457d783e6`. The 178-count result is historical evidence and was not rerun in this closeout. The host suite does not cover Matter timeout, late-event cancellation, or request-slot reuse. |
+| Host/component tests | `127/127 PASS` (17+20+10+21+25+34) | Persistent current log hash: `33de1b8f1d7430d45c8c04d2826df912e58f0e8aa3cf2758a559cea457d783e6`. This is the only closeout Host count retained. The host suite does not cover Matter timeout, late-event cancellation, or request-slot reuse; test sources are outside this task's `owned_paths`, so adding such coverage requires a Reviewer/Human Lead decision. |
 | Runtime stack evidence | Previous flashed image telemetry: radar 1980 B, UI 1156 B, state machine 4128 B, network 6256 B, env sensor 2192 B | No Matter-adapter high-water mark was captured; these values are not a post-patch HIL measurement. |
-| Controller HIL | **DEFERRED** | `/dev/ttyUSB0` is present, but no existing chip-tool Fabric storage was found. No empty storage or new commissioning was used. |
+| Controller HIL | **DEFERRED** | At the current WSL check `/dev/ttyUSB0` is absent, and no existing chip-tool Fabric storage was found. No empty storage or new commissioning was used. |
 
 ### Image and resource records
 
@@ -74,6 +78,7 @@ does not compile on the locked SDK. Its persistent failure-log hash is
 | NIGHT `ChangeToMode(2)` guard | **DEFERRED** | Code, host, and build evidence exist, but no controller failure response was captured. |
 | T17 | **DEFERRED** | Automatic NIGHT entry/exit was intentionally not tested. |
 | T19 | **PARTIAL — recovery read only; synchronization insufficiently verified** | No actual offline local-state change followed by a post-recovery latest-value read was captured. |
+| P1 independent review | **SKIPPED** | Explicitly skipped by Human Lead instruction; this handoff contains no independent Reviewer sign-off. |
 
 ## Evidence retention and safety
 

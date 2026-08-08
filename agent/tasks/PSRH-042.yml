@@ -2,9 +2,21 @@ task_id: "PSRH-042"
 title: "Matter API compatibility on ESP-Matter release/v1.5"
 status: "VERIFYING"
 goal: "在锁定的 ESP-Matter release/v1.5 上完成 Matter API 兼容、保持 EP0/EP1/EP2 数据模型不变，并产生构建/size/测试证据"
-owner: "gpt-5.6-luna max"
-reviewer: "Codex"
+builder_lead: "gpt-5.6-terra"
+owner: "gpt-5.6-luna"
+owner_reasoning_effort: "max"
+reviewer: "gpt-5.6-sol"
 baseline_commit: "02e67aa5216529ca83bff32bbf46ac1a8972e48d"
+
+review_scope:
+  included_commits:
+    - "2392a3b54564fcc270faa54d98bbdc7e3d923298"
+    - "b9dee960936e61b136ffb19598abd21ae9f456f2"
+    - "54014834049fb44e7f3564e40b334b438a3bd10c"
+    - "587243575138a3983c6658c4eb991d89ffa1de2f"
+  excluded_commits:
+    - commit: "c341e512600e673ca23fb73b377a4a8052d1b3a1"
+      reason: "Separately synchronized collaboration/governance documentation; not PSRH-042 functional delivery."
 
 owned_paths:
   - "firmware/main/matter_app.cpp"

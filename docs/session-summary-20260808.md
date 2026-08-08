@@ -5,6 +5,8 @@
 项目：PrivacySense-Matter-Room-Hub
 分支：`agent/psrh-042-matter-v15`
 
+固定审查目标：实现提交 `2392a3b`、`b9dee96`，元数据提交 `5401483`、`5872435`；协作规范提交 `c341e51` 是单独同步的治理文档，不算 PSRH-042 功能交付。P1 独立审查按 Human Lead 指令跳过，本摘要不声称 Reviewer sign-off。
+
 ## 1. 本轮任务边界
 
 本轮严格采用最小增量验收范围：
@@ -31,7 +33,7 @@
 - 本轮没有重新烧录；普通 flash 因此前置“不额外烧录”约束未获安全批准，当前板上运行镜像不是本轮修正后的镜像。
 - 本轮代码收口修改位于 `firmware/main/matter_app.cpp`、`firmware/main/matter_app.h`、`firmware/main/state_machine.c`、`firmware/main/state_machine.h`：ChangeToMode 在 SDK 写入前同步等待状态机提交/拒绝；超时请求保持占用并在迟到事件处理前取消；NIGHT 由 SupportedModesManager 和状态机双重校验；本地 EP1/EP2 投影使用 `attribute::report()`；报告失败通过代际 FORCE_SYNC 重试；QUIET→NIGHT 保存实际进入前模式。
 - 资源结果：当前 clean BIN `1,904,896 B`、Flash Code `1,752,010 B`、DIRAM `241,781 B`、LP SRAM `24 B`；相对兼容参考 `f6e9b6c` 分别为 `+2,480 B`、`+2,476 B`、`+200 B`、`+0 B`。正式 `02e67aa` 因 API 不兼容无法给出数值增量。
-- 当前 Host 测试日志实际为 `127/127 PASS`（17+20+10+21+25+34）；历史完整组件计数 `178/178 PASS` 不在本轮重跑。该套件没有覆盖 Matter 请求超时、迟到事件取消或请求槽复用路径，不对此类路径宣称 Host PASS。
+- 当前 Host 测试日志实际为 `127/127 PASS`（17+20+10+21+25+34），也是本次收口唯一保留的 Host 计数；持久日志哈希为 `33de1b8f1d7430d45c8c04d2826df912e58f0e8aa3cf2758a559cea457d783e6`。该套件没有覆盖 Matter 请求超时、迟到事件取消或请求槽复用路径，不对此类路径宣称 Host PASS；测试代码不在本任务 `owned_paths` 中，是否新增覆盖需由 Reviewer/人类决定。
 - 既有项目告警仍保持记录，包括 CMake deprecation、未使用函数和上游告警；未将其误报为本轮新增问题。
 
 ## 3. WSL、USB 和网络环境
@@ -122,8 +124,9 @@
 - 原有代码和证据变更均保留，未执行破坏性清理或 reset。
 - T14/T15 原始日志此前保留在 `/tmp`，现已被清理；无法复制到持久目录或计算 SHA-256。未提交任何原始日志、Fabric 存储或敏感信息。
 - 宿主只读搜索未找到既有 `chip_tool_config*.ini`；未创建空存储、未重新 commissioning。
+- 本次收口检查时 `/dev/ttyUSB0` 不存在；因此没有执行依赖真实串口和既有 Fabric 的 T05/T16/NIGHT/T17/T19 HIL。
 - 本次非破坏性串口观察只记录运行心跳；持久副本位于 `/home/administrator/Project/PrivacySense-Matter-Room-Hub-artifacts/psrh-042-matter-v15/20260808/closeout/serial-observation-20260808.log`，SHA-256 为 `91d67b46637f067eed253146ba1b2c22254cb0fb31145ce0c53e0a8b7c555029`，不作为 T16/T05/T19 PASS 证据。
 - 当前增量构建、clean build/size、Host 测试、正式基线失败和兼容参考日志均直接保存在 `.../20260808/` 持久目录（clean build 根目录为 `clean-build-b9dee96/`）；没有新的日志依赖外部 `/tmp`。
-- 分支历史中的 `c341e51` 仅修改 `AGENTS.md`、`agent/task_templates/task-contract.yml`、`docs/multi-agent-development.md`，不属于 PSRH-042 授权交付范围；未改写历史，整分支合并前需 Human Lead 单独接受或由有权限者拆分。
+- 分支历史中的 `c341e512600e673ca23fb73b377a4a8052d1b3a1`（短哈希 `c341e51`）仅修改 `AGENTS.md`、`agent/task_templates/task-contract.yml`、`docs/multi-agent-development.md`，不属于 PSRH-042 授权交付范围；未改写历史，整分支合并前需 Human Lead 单独接受或由有权限者拆分。
 - 没有执行 `idf.py flash`、`erase-flash`、NVS 擦除或重新 commissioning。
 - 当前文件的格式检查：`git diff --check` 通过。
