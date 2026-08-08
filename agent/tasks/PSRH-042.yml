@@ -1,0 +1,63 @@
+task_id: "PSRH-042"
+title: "Matter API compatibility on ESP-Matter release/v1.5"
+status: "VERIFYING"
+goal: "在锁定的 ESP-Matter release/v1.5 上完成 Matter API 兼容、保持 EP0/EP1/EP2 数据模型不变，并产生构建/size/测试证据"
+owner: "gpt-5.6-luna max"
+reviewer: "Codex"
+baseline_commit: "02e67aa5216529ca83bff32bbf46ac1a8972e48d"
+
+owned_paths:
+  - "firmware/main/matter_app.cpp"
+  - "firmware/main/state_machine.c"
+read_only_paths:
+  - "docs/interfaces/**"
+  - "docs/matter-data-model.md"
+  - "docs/task-architecture.md"
+  - "docs/approved_sources/**"
+  - "hardware/**"
+
+interfaces:
+  - "docs/interfaces/README.md"
+  - "docs/matter-data-model.md"
+approved_sources:
+  - "docs/approved_sources/README.md"
+related_adrs: []
+
+constraints:
+  mcu: "ESP32-C6"
+  transport: "Matter over Wi-Fi; BLE only for commissioning/maintenance"
+  build_directory: "External and task-specific; recommended /root/build/privacy-sense/psrh-042-matter-v15"
+  matter_data_model: "Keep the approved EP0/EP1/EP2 topology, device types, clusters, attributes, mode values, and offline semantics unchanged. The Radar FeatureMap addition is the sole explicitly approved model-level delta and must remain isolated and called out in the handoff."
+  max_stack_bytes: "No increase approved; measure and report the actual value"
+  max_flash_increase_bytes: "Not yet approved; measure against the baseline build"
+  heap_allocation_after_init: "bounded; supported-mode data must remain static unless separately approved"
+  local_behavior_when_offline: "The local state machine continues operating; Matter attributes are not assumed reachable offline and are synchronized after reconnection."
+
+acceptance:
+  - "A clean ESP32-C6 build succeeds against the recorded ESP-IDF and ESP-Matter release/v1.5 toolchain, with all warnings classified."
+  - "The EP0/EP1/EP2 topology, device types, cluster IDs, attribute IDs, mode values, and approved offline semantics remain unchanged from docs/matter-data-model.md."
+  - "Endpoint 2 exposes exactly Normal=0, Quiet=1, and Night=2 through the ESP-Matter 1.5 SupportedModes API, with empty semantic-tag lists and no unbounded runtime allocation."
+  - "The ModeSelect attribute callback uses the locked SDK callback semantics, validates queue failure, and does not pass a transient Matter command context across tasks."
+  - "ChangeToMode NIGHT is rejected synchronously by the ESP-Matter SupportedModesManager unless local time is valid and inside the configured night window; the state machine re-checks the same policy after queue delivery."
+  - "The explicitly approved Radar FeatureMap is compatible with the locked SDK and is the only Matter data-model delta; the approved occupancy value mapping and local UNKNOWN/offline behavior remain intact."
+  - "Build, size, host/static test, and any deferred hardware evidence are recorded against the task commit and toolchain."
+
+required_evidence:
+  - "builder_handoff"
+  - "build_result"
+  - "size_result"
+  - "test_result"
+  - "resource_measurement_or_gap"
+  - "sanitized_hardware_evidence_or_explicit_deferral"
+
+forbidden:
+  - "Change a public interface or the approved Matter data model without human approval and an architecture record"
+  - "Commit credentials, setup payloads, private keys, MAC addresses, or raw logs"
+  - "Bypass tests, warnings, watchdog, or error handling"
+  - "Treat the current unbuilt working-tree diff as completed or accepted"
+
+approval:
+  required: true
+  approved_by: "Human Lead (explicit user approval)"
+  approved_at: "2026-08-07"
+  notes: "Approved to proceed from baseline 02e67aa in the isolated Builder branch/worktree and a task-specific external build directory. EP0/EP1/EP2 topology, device types, clusters, attributes, mode values, and offline semantics are frozen. The Radar FeatureMap addition is explicitly approved as the sole Matter data-model delta; no other model/interface change is approved. Build, size, test, and handoff evidence are mandatory. Follow-up scope explicitly requested by Human Lead on 2026-08-07: add the ChangeToMode NIGHT window semantic guard in firmware/main/matter_app.cpp and firmware/main/state_machine.c without changing the Matter data model."

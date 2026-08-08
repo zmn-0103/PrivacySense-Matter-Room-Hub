@@ -652,7 +652,32 @@ static void process_matter_lifecycle(const matter_lifecycle_t *lifecycle)
     }
 }
 
-static void process_matter_command(const matter_command_t *cmd)
+// Re-check the local NIGHT policy after the command has crossed the event
+// queue. The SupportedModesManager rejects the controller command before the
+// Matter attribute write, while this second check prevents queue latency or a
+// configuration/time-window boundary from turning an already-queued request
+// into an invalid local state transition.
+static bool matter_night_window_allows_entry(const ps_config_t *cfg)
+{
+    if (cfg == NULL) return false;
+
+    night_window_sm_state_t candidate = {
+        .user_mode      = NIGHT_WINDOW_MODE_NORMAL,
+        .pre_night_mode = NIGHT_WINDOW_MODE_NORMAL,
+        .quiet_active   = false,
+    };
+    night_window_time_t t = get_current_time();
+    night_window_config_t nwc = {
+        .night_start_min = cfg->night_start_min,
+        .night_end_min   = cfg->night_end_min,
+    };
+
+    (void)night_window_sm_eval(&candidate, &t, &nwc);
+    return candidate.user_mode == NIGHT_WINDOW_MODE_NIGHT;
+}
+
+static void process_matter_command(const matter_command_t *cmd,
+                                   const ps_config_t *cfg)
 {
     if (cmd->type != MATTER_COMMAND_CHANGE_TO_MODE) {
         ESP_LOGW(TAG, "unknown matter command type %d", (int)cmd->type);
@@ -662,6 +687,11 @@ static void process_matter_command(const matter_command_t *cmd)
     uint8_t new_mode = cmd->new_mode;
     if (new_mode > 2) {
         ESP_LOGW(TAG, "MATTER ChangeToMode: rejected invalid mode %u", (unsigned)new_mode);
+        return;
+    }
+
+    if (new_mode == MODE_NIGHT && !matter_night_window_allows_entry(cfg)) {
+        ESP_LOGW(TAG, "MATTER ChangeToMode: NIGHT rejected outside valid night window");
         return;
     }
 
@@ -806,7 +836,7 @@ void state_machine_task(void *pvParameters)
                 process_network(ev.data.network);
                 break;
             case EVENT_MATTER_COMMAND:
-                process_matter_command(&ev.data.matter_cmd);
+                process_matter_command(&ev.data.matter_cmd, &cfg);
                 break;
             case EVENT_MATTER_LIFECYCLE:
                 process_matter_lifecycle(&ev.data.matter_lifecycle);

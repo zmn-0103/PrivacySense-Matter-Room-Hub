@@ -56,6 +56,8 @@
 #include <esp_matter.h>
 #include <esp_matter_endpoint.h>
 
+#include <time.h>
+
 #include "esp_bt.h"
 #include "esp_log.h"
 #include "esp_task_wdt.h"
@@ -65,6 +67,10 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
+
+#include "config.h"
+#include "network.h"
+#include "night_window_sm.h"
 
 #include <app/server/Server.h>
 #include <credentials/FabricTable.h>
@@ -88,9 +94,107 @@ static endpoint_t *s_ep2_mode_select  = nullptr;   // Mode Select (0x0027)
 static uint16_t s_ep1_id = 0;
 static uint16_t s_ep2_id = 0;
 
+// ChangeToMode is validated by the ESP-Matter ModeSelect server before it
+// writes CurrentMode. Keep the policy check synchronous at that boundary so
+// a controller receives a failure instead of an optimistic success while the
+// state-machine queue is still pending. Fail closed until local time is valid
+// and the current minute is inside the configured NIGHT window.
+static bool matter_night_window_is_active(void)
+{
+    if (!network_time_is_synced()) {
+        return false;
+    }
+
+    ps_config_t cfg;
+    if (config_get(&cfg) != ESP_OK) {
+        return false;
+    }
+
+    time_t now = time(nullptr);
+    struct tm local_tm = {};
+    if (localtime_r(&now, &local_tm) == nullptr ||
+        local_tm.tm_hour < 0 || local_tm.tm_hour > 23 ||
+        local_tm.tm_min < 0 || local_tm.tm_min > 59) {
+        return false;
+    }
+
+    night_window_sm_state_t candidate = {
+        .user_mode = NIGHT_WINDOW_MODE_NORMAL,
+        .pre_night_mode = NIGHT_WINDOW_MODE_NORMAL,
+        .quiet_active = false,
+    };
+    night_window_time_t current_time = {
+        .time_valid = true,
+        .local_minute = (uint16_t)(local_tm.tm_hour * 60 + local_tm.tm_min),
+    };
+    night_window_config_t window = {
+        .night_start_min = cfg.night_start_min,
+        .night_end_min = cfg.night_end_min,
+    };
+
+    (void)night_window_sm_eval(&candidate, &current_time, &window);
+    return candidate.user_mode == NIGHT_WINDOW_MODE_NIGHT;
+}
+
 // Supported modes for EP2 ModeSelect (matter-data-model.md §4.2).
-// Phase 3 Step 6: 3 modes — Normal(0), Quiet(1), Night(2).
-static ModeSelect::StaticSupportedModesManager s_supported_modes;
+// The ESP-Matter v1.5 API requires an application-provided manager. Keep the
+// option data static: it is immutable for the firmware lifetime and avoids
+// the factory-NVS-backed example manager's dynamic allocation.
+using room_mode_option_t = ModeSelect::Structs::ModeOptionStruct::Type;
+
+static const room_mode_option_t s_room_supported_modes[] = {
+    {
+        .label = chip::CharSpan::fromCharString("Normal"),
+        .mode = 0,
+        .semanticTags = chip::app::DataModel::List<const ModeSelect::Structs::SemanticTagStruct::Type>(),
+    },
+    {
+        .label = chip::CharSpan::fromCharString("Quiet"),
+        .mode = 1,
+        .semanticTags = chip::app::DataModel::List<const ModeSelect::Structs::SemanticTagStruct::Type>(),
+    },
+    {
+        .label = chip::CharSpan::fromCharString("Night"),
+        .mode = 2,
+        .semanticTags = chip::app::DataModel::List<const ModeSelect::Structs::SemanticTagStruct::Type>(),
+    },
+};
+
+class room_supported_modes_manager final : public ModeSelect::SupportedModesManager {
+public:
+    ModeOptionsProvider getModeOptionsProvider(chip::EndpointId endpoint_id) const override
+    {
+        if (endpoint_id != s_ep2_id) {
+            return ModeOptionsProvider();
+        }
+        return ModeOptionsProvider(s_room_supported_modes,
+                                   s_room_supported_modes + (sizeof(s_room_supported_modes) /
+                                                             sizeof(s_room_supported_modes[0])));
+    }
+
+    chip::Protocols::InteractionModel::Status getModeOptionByMode(
+        chip::EndpointId endpoint_id, uint8_t mode,
+        const room_mode_option_t **data_ptr) const override
+    {
+        if (data_ptr == nullptr || endpoint_id != s_ep2_id) {
+            return chip::Protocols::InteractionModel::Status::UnsupportedCluster;
+        }
+
+        for (const auto &option : s_room_supported_modes) {
+            if (option.mode == mode) {
+                if (mode == MODE_NIGHT && !matter_night_window_is_active()) {
+                    ESP_LOGW(TAG, "ChangeToMode: NIGHT rejected outside valid night window");
+                    return chip::Protocols::InteractionModel::Status::Failure;
+                }
+                *data_ptr = &option;
+                return chip::Protocols::InteractionModel::Status::Success;
+            }
+        }
+        return chip::Protocols::InteractionModel::Status::InvalidCommand;
+    }
+};
+
+static room_supported_modes_manager s_supported_modes;
 
 #define MATTER_ADAPTER_QUEUE_TIMEOUT_MS  2000U   // task-architecture.md §7.2 (≤ 2 s feed gap)
 
@@ -187,11 +291,10 @@ static void app_event_cb(const ChipDeviceEvent *event, intptr_t arg)
     }
 
     if (send_lifecycle) {
-        app_event_t ev = {
-            .type = EVENT_MATTER_LIFECYCLE,
-            .data.matter_lifecycle = lifecycle,
-            .timestamp_ms = xTaskGetTickCount() * portTICK_PERIOD_MS,
-        };
+        app_event_t ev = {};
+        ev.type = EVENT_MATTER_LIFECYCLE;
+        ev.data.matter_lifecycle = lifecycle;
+        ev.timestamp_ms = xTaskGetTickCount() * portTICK_PERIOD_MS;
         if (xQueueSend(g_app_event_queue, &ev, 0) != pdTRUE) {
             ESP_LOGW(TAG, "lifecycle event %d dropped (app_event_queue full)",
                      (int)lifecycle.event);
@@ -211,8 +314,8 @@ static esp_err_t app_attribute_update_cb(attribute::callback_type_t type,
 {
     (void)priv_data;
 
-    // Only handle POST_WRITE on EP2 ModeSelect::CurrentMode (ChangeToMode).
-    if (type != attribute::callback_type_t::PRE_ATTRIBUTE_CHANGE ||
+    // Only handle PRE_UPDATE on EP2 ModeSelect::CurrentMode (ChangeToMode).
+    if (type != attribute::PRE_UPDATE ||
         endpoint_id != s_ep2_id ||
         cluster_id != ModeSelect::Id ||
         attribute_id != ModeSelect::Attributes::CurrentMode::Id) {
@@ -224,19 +327,15 @@ static esp_err_t app_attribute_update_cb(attribute::callback_type_t type,
     uint8_t new_mode = val->val.u8;
     ESP_LOGI(TAG, "ChangeToMode: controller requests mode %u", (unsigned)new_mode);
 
-    // Forward to state_machine_task for validation against local constraints
-    // (NIGHT window, etc.) and execution.
-    app_event_t ev = {
-        .type = EVENT_MATTER_COMMAND,
-        .data.matter_cmd = {
-            .type     = MATTER_COMMAND_CHANGE_TO_MODE,
-            .new_mode = new_mode,
-            .cmd_ctx  = nullptr,   // Phase 3 Step 6: cmd_ctx is the callback
-                                   // itself; we respond inline from the CHIP
-                                   // context via matter_adapter_task.
-        },
-        .timestamp_ms = xTaskGetTickCount() * portTICK_PERIOD_MS,
-    };
+    // The SupportedModesManager has already applied the synchronous local
+    // policy gate. Forward to state_machine_task for execution and its
+    // defense-in-depth re-check after the queue handoff.
+    app_event_t ev = {};
+    ev.type = EVENT_MATTER_COMMAND;
+    ev.data.matter_cmd.type = MATTER_COMMAND_CHANGE_TO_MODE;
+    ev.data.matter_cmd.new_mode = new_mode;
+    ev.data.matter_cmd.cmd_ctx = nullptr;
+    ev.timestamp_ms = xTaskGetTickCount() * portTICK_PERIOD_MS;
     if (xQueueSend(g_app_event_queue, &ev, 0) != pdTRUE) {
         ESP_LOGE(TAG, "ChangeToMode event dropped (queue full) — command ignored");
         return ESP_FAIL;
@@ -288,6 +387,12 @@ esp_err_t matter_app_init(void)
             chip::to_underlying(OccupancySensing::OccupancySensorTypeEnum::kPir);
         occ_cfg.occupancy_sensing.occupancy_sensor_type_bitmap =
             chip::to_underlying(OccupancySensing::OccupancySensorTypeBitmap::kPir);
+        // ESP-Matter requires at least one Occupancy Sensing feature. The
+        // LD2410C is a mmWave radar sensor, so expose the corresponding
+        // feature while retaining the legacy sensor-type attributes required
+        // by the Occupancy Sensor device type.
+        occ_cfg.occupancy_sensing.feature_flags =
+            cluster::occupancy_sensing::feature::radar::get_id();
 
         s_ep1_occupancy = endpoint::occupancy_sensor::create(
             s_node, &occ_cfg, ENDPOINT_FLAG_NONE, nullptr);
@@ -314,25 +419,7 @@ esp_err_t matter_app_init(void)
         }
         s_ep2_id = endpoint::get_id(s_ep2_mode_select);
 
-        // Register the 3 supported modes.
-        // TODO: supported modes should be configurable per matter-data-model.md §4.2.
-        //       Hardcoding here is Phase 3 Step 6 baseline; future iteration should
-        //       populate from a configurable source.
-        s_supported_modes.AddMode(ModeSelect::ModeOptionStruct{
-            .label = chip::CharSpan("Normal", 6),
-            .mode = 0,
-            .modeTags = chip::Span<const ModeSelect::ModeTagStruct>(),
-        });
-        s_supported_modes.AddMode(ModeSelect::ModeOptionStruct{
-            .label = chip::CharSpan("Quiet", 5),
-            .mode = 1,
-            .modeTags = chip::Span<const ModeSelect::ModeTagStruct>(),
-        });
-        s_supported_modes.AddMode(ModeSelect::ModeOptionStruct{
-            .label = chip::CharSpan("Night", 5),
-            .mode = 2,
-            .modeTags = chip::Span<const ModeSelect::ModeTagStruct>(),
-        });
+        ModeSelect::setSupportedModesManager(&s_supported_modes);
 
         ESP_LOGI(TAG, "EP2 Mode Select created (endpoint %u, 3 modes)",
                  (unsigned)s_ep2_id);
@@ -433,7 +520,7 @@ void matter_adapter_task(void *pvParameters)
                 esp_matter::lock::ScopedChipStackLock lock(portMAX_DELAY);
 
                 if (should_update_occupancy) {
-                    esp_matter_attr_val_t val = esp_matter_uint8(occ_val);
+                    esp_matter_attr_val_t val = esp_matter_bitmap8(occ_val);
                     attribute::update(s_ep1_id,
                                       OccupancySensing::Id,
                                       OccupancySensing::Attributes::Occupancy::Id,
