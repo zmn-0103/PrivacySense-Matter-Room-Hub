@@ -28,7 +28,7 @@
 ## 2. 构建与代码状态
 
 - 按用户要求限制并行任务为 `-j2`；文档命令为 `ninja -C firmware/build -j2`。
-- 正式基线 `02e67aa` 的独立构建退出码为 `1`：旧 `ModeOptionStruct` API 在锁定 ESP-Matter 1.5 上于链接前失败；该失败日志已复制到仓库外持久目录。为得到可比增量，收口前兼容快照 `f6e9b6c` 完成 `1497/1497`；本轮超时修正提交 `b9dee96` 的持久外部 clean 源树也完成 `1497/1497`，当前工作树按文档命令 `ninja -C firmware/build -j2` 退出码为 `0`，最新脱敏日志哈希为 `eb9358823c5af9346aeab7cb47014af704d8665f85f5decacd356f4090b36b26`。
+- 正式基线 `02e67aa` 的独立构建退出码为 `1`：旧 `ModeOptionStruct` API 在锁定 ESP-Matter 1.5 上于链接前失败；该失败日志已复制到仓库外持久目录。为得到可比增量，收口前兼容快照 `f6e9b6c` 完成 `1497/1497`；本轮超时修正提交 `b9dee96` 的持久外部 clean 源树也完成 `1497/1497`。在 `HEAD=f8e5f9a` 加载锁定环境后，生产 `ninja -C firmware/build -j2` 退出码为 `0`，日志哈希为 `dd482e21dd055a5f8d7718c1aa108eb7850c50a6597f9a288651c1553606b574`；5 分钟 HIL 受限构建也退出码为 `0`，日志哈希为 `38099f5a904335ae9f85ba14fe363f4d5633c2ec6c41d754954c10c18c847999`。
 - `git diff --check` 已通过。
 - 用户已明确授权烧录 5 分钟 HIL 变体；使用受限 `ninja -C <external-hil-build-dir> -j2` 构建并烧录，未执行 `erase-flash`，NVS/Fabric 保留。
 - 本轮代码收口修改位于 `firmware/main/matter_app.cpp`、`firmware/main/matter_app.h`、`firmware/main/state_machine.c`、`firmware/main/state_machine.h`：ChangeToMode 在 SDK 写入前同步等待状态机提交/拒绝；超时请求保持占用并在迟到事件处理前取消；NIGHT 由 SupportedModesManager 和状态机双重校验；本地 EP1/EP2 投影使用 `attribute::report()`；报告失败通过代际 FORCE_SYNC 重试；QUIET→NIGHT 保存实际进入前模式。

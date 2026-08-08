@@ -34,7 +34,7 @@ committed.
 | Check | Exact command/result | Evidence or limitation |
 |---|---|---|
 | Diff hygiene | `git diff --check` — PASS | Re-run immediately before each commit. |
-| Current worktree build | `ninja -C firmware/build -j2` — exit `0` | Latest restricted rerun log hash: `eb9358823c5af9346aeab7cb47014af704d8665f85f5decacd356f4090b36b26`; app image size `0x1d1100` bytes. |
+| Current HEAD production build | `HEAD=f8e5f9a`; environment loaded; `unset PSRH_HIL_NIGHT_EXIT_AFTER_MS; ninja -C firmware/build -j2` — exit `0` | Log SHA-256: `dd482e21dd055a5f8d7718c1aa108eb7850c50a6597f9a288651c1553606b574`; BIN `f44143e76e5d58507bcf9d363580a8846fa198d6f57e5eac96b02afb9c897bbf`; ELF `5115aff32c50875b29442a7193090e3790d02171339da889fff6240985c6e239`; app image size `0x1d1100` bytes. |
 | Clean ESP32-C6 build | External fresh source/build from `b9dee96`; `ninja -C build -j2` — `1497/1497`, exit `0` | Persistent source/build root: `/home/administrator/Project/PrivacySense-Matter-Room-Hub-artifacts/psrh-042-matter-v15/20260808/clean-build-b9dee96/`; build log hash: `53eb016ccf37229fbdf47ff8ebe9a1cc7122e540abbb2e50e68c332524ad2f46`. |
 | Clean size | `idf.py -B build size` — exit `0` | Persistent size log hash: `a14be98d8b5757ba0da7a026597c5a0a5c9842e542edf538f68b9b915e6e2a90`. |
 | Current image | BIN/ELF SHA-256 recorded below | Clean external-build images; outputs stay outside Git. |
@@ -42,7 +42,7 @@ committed.
 | Pre-closeout comparison | Independent temporary source tree from `f6e9b6c`, `ninja -C build -j2` — `1497/1497`, exit `0` | Nearest compatible reference for the reviewer fix; persistent log hash: `afb5e58120b3d8c904243a14946d52808c5e7e7425f2699ea9fc198df8cb9547`. It is not substituted for the formal baseline. |
 | Host/component tests | `127/127 PASS` (17+20+10+21+25+34) | Current rerun log hash: `5192e245d11802a0663c014caacb4ca8bb0a000639c60d91e8d16c39c9627b50`. The host suite does not cover Matter timeout, late-event cancellation, or request-slot reuse; test sources are outside this task's `owned_paths`, so adding such coverage requires a Reviewer/Human Lead decision. |
 | Runtime stack evidence | Previous flashed image telemetry: radar 1980 B, UI 1156 B, state machine 4128 B, network 6256 B, env sensor 2192 B | No Matter-adapter high-water mark was captured; these values are not a post-patch HIL measurement. |
-| Restricted 5-minute HIL build | `PSRH_HIL_NIGHT_EXIT_AFTER_MS=300000`; `ninja -C <external-hil-build-dir> -j2` — PASS | Binary SHA-256: `04623b72727d6ad96eef8dc2d37407be1b8649ff661cdfbac2c684a6c9e3bee5`; production default remains unchanged. |
+| HEAD restricted 5-minute HIL build | `HEAD=f8e5f9a`; `PSRH_HIL_NIGHT_EXIT_AFTER_MS=300000`; `ninja -C <external-hil-build-dir> -j2` — exit `0` | Log SHA-256: `38099f5a904335ae9f85ba14fe363f4d5633c2ec6c41d754954c10c18c847999`; BIN `04623b72727d6ad96eef8dc2d37407be1b8649ff661cdfbac2c684a6c9e3bee5`; ELF `5d1aba7100a33266e5f270bb02b7515586c7c34c5583ba4ee31e5fea1528c220`; CMake reported the 300000 ms override; production default remains unchanged. |
 | HIL flash | `idf.py -B <external-hil-build-dir> -p /dev/ttyUSB0 flash` — PASS | No `erase-flash`; only bootloader/app/partition/OTA metadata were written; NVS/Fabric remained. Explicit Human Lead authorization was recorded in the session. |
 | Controller HIL | **PARTIAL by test item** | T05, T16, and NIGHT protection PASS; T14, T17, T19, and the device-restart endpoint pair remain PARTIAL at the evidence boundaries below. |
 
