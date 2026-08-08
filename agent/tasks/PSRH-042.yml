@@ -19,6 +19,7 @@ review_scope:
   excluded_commits:
     - commit: "c341e512600e673ca23fb73b377a4a8052d1b3a1"
       reason: "Separately synchronized collaboration/governance documentation; not PSRH-042 functional delivery."
+      acceptance: "ACCEPTED SEPARATELY BY HUMAN LEAD on 2026-08-09; excluded from the PSRH-042 functional review scope but no longer a merge blocker."
 
 owned_paths:
   - "firmware/main/CMakeLists.txt"
@@ -50,7 +51,7 @@ delivery_scope:
       - "AGENTS.md"
       - "agent/task_templates/task-contract.yml"
       - "docs/multi-agent-development.md"
-    status: "OUTSIDE PSRH-042 delivery scope; separate Human Lead acceptance or an authorized history split is required before merging the full branch."
+    status: "ACCEPTED SEPARATELY BY HUMAN LEAD on 2026-08-09; remains outside PSRH-042 functional delivery scope and may remain in branch history."
 read_only_paths:
   - "docs/interfaces/**"
   - "docs/matter-data-model.md"
@@ -120,4 +121,4 @@ approval:
   required: true
   approved_by: "Human Lead (explicit user approval)"
   approved_at: "2026-08-07"
-  notes: "Approved to proceed from baseline 02e67aa in the isolated Builder branch/worktree and a task-specific external build directory. EP0/EP1/EP2 topology, device types, clusters, attributes, mode values, and offline semantics are frozen. The Radar FeatureMap addition is explicitly approved as the sole Matter data-model delta; no other model/interface change is approved. Build, size, test, and handoff evidence are mandatory. Follow-up scope explicitly requested by Human Lead on 2026-08-07: add the ChangeToMode NIGHT window semantic guard in firmware/main/matter_app.cpp and firmware/main/state_machine.c without changing the Matter data model. Follow-up scope explicitly requested by Human Lead on 2026-08-08: close the reviewer findings in the owned implementation units, include their private headers, update the task contract, and commit sanitized evidence, the builder handoff, and the acceptance/session summary. Follow-up scope explicitly requested by Human Lead on 2026-08-09: include firmware/main/CMakeLists.txt in the approved owned/delivery scope and submit commits 5d2e356 and 6f498df for review."
+  notes: "Approved to proceed from baseline 02e67aa in the isolated Builder branch/worktree and a task-specific external build directory. EP0/EP1/EP2 topology, device types, clusters, attributes, mode values, and offline semantics are frozen. The Radar FeatureMap addition is explicitly approved as the sole Matter data-model delta; no other model/interface change is approved. Build, size, test, and handoff evidence are mandatory. Follow-up scope explicitly requested by Human Lead on 2026-08-07: add the ChangeToMode NIGHT window semantic guard in firmware/main/matter_app.cpp and firmware/main/state_machine.c without changing the Matter data model. Follow-up scope explicitly requested by Human Lead on 2026-08-08: close the reviewer findings in the owned implementation units, include their private headers, update the task contract, and commit sanitized evidence, the builder handoff, and the acceptance/session summary. Follow-up scope explicitly requested by Human Lead on 2026-08-09: include firmware/main/CMakeLists.txt in the approved owned/delivery scope and submit commits 5d2e356 and 6f498df for review. Human Lead separately accepted c341e51 on 2026-08-09; it remains excluded from PSRH-042 functional delivery but is no longer a merge blocker."

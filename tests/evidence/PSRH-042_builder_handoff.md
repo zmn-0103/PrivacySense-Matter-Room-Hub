@@ -8,7 +8,7 @@
 - Fixed independent review target: implementation commits `2392a3b54564fcc270faa54d98bbdc7e3d923298` and `b9dee960936e61b136ffb19598abd21ae9f456f2`, plus metadata commits `54014834049fb44e7f3564e40b334b438a3bd10c` and `587243575138a3983c6658c4eb991d89ffa1de2f`.
 - Roles: builder lead `gpt-5.6-terra`; builder `gpt-5.6-luna` with reasoning effort `max`; independent reviewer `gpt-5.6-sol`.
 - Independent review status: **SKIPPED** per Human Lead instruction for this closeout; no `gpt-5.6-sol` sign-off is claimed.
-- Explicitly excluded from PSRH-042 functional delivery: `c341e512600e673ca23fb73b377a4a8052d1b3a1` / `c341e51` (separately synchronized collaboration/governance documentation).
+- Explicitly excluded from PSRH-042 functional delivery, but separately accepted by Human Lead on 2026-08-09: `c341e512600e673ca23fb73b377a4a8052d1b3a1` / `c341e51` (collaboration/governance documentation).
 - Final implementation commit: `b9dee960936e61b136ffb19598abd21ae9f456f2` — contains the timeout-cancellation fix and task-contract scope. This metadata follow-up records the clean-build evidence and final acceptance state for that implementation.
 - New Fabric HIL follow-up commit: `5d2e356` — adds the opt-in five-minute NIGHT exit test variant and binds the sanitized HIL acceptance results recorded below.
 - Implementation paths in this closeout: `firmware/main/matter_app.cpp`, `firmware/main/matter_app.h`, `firmware/main/state_machine.c`, `firmware/main/state_machine.h`.
@@ -96,7 +96,7 @@ does not compile on the locked SDK. Its persistent failure-log hash is
 - Persistent build, clean-build, size, host-test, and sanitized HIL evidence are stored outside the repository at `/home/administrator/Project/PrivacySense-Matter-Room-Hub-artifacts/psrh-042-matter-v15/20260808/`; the retained build/size/test hashes are recorded above. The HIL evidence directory contains only sanitized conclusions and no raw controller/serial log.
 - Raw controller logs, Fabric storage, credentials, setup payloads, MAC addresses, and complete IPv6 addresses are not committed.
 - A factory reset was explicitly authorized and performed before the new Fabric HIL. The 5-minute HIL image was explicitly authorized and flashed without `erase-flash`; no later NVS erase or re-commissioning was performed.
-- Other branches were inspected read-only and not modified. Pre-existing collaboration/documentation commit `c341e51` changes `AGENTS.md`, `agent/task_templates/task-contract.yml`, and `docs/multi-agent-development.md`; it is outside PSRH-042 delivery scope. No history rewrite was performed. The full branch requires separate Human Lead acceptance of that governance commit or an authorized split before merge.
+- Other branches were inspected read-only and not modified. Pre-existing collaboration/documentation commit `c341e51` changes `AGENTS.md`, `agent/task_templates/task-contract.yml`, and `docs/multi-agent-development.md`; it remains outside PSRH-042 functional delivery, but Human Lead separately accepted it on 2026-08-09, so it is no longer a merge blocker. No history rewrite was performed.
 
 ## Handoff condition
 

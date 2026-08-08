@@ -154,6 +154,6 @@ closeout controller storage manifest snapshot SHA-256：
 - 本轮使用新 Fabric 的持久 storage；未创建空 storage，未在本轮再次 commissioning。
 - 新 Fabric HIL 的 T05/T16/NIGHT/T17/T19 已依赖真实串口和同一 storage 执行；T14/T17/T19 的 PARTIAL 边界见本摘要及脱敏证据文件。
 - 当前增量构建、clean build/size、Host 测试、正式基线失败和兼容参考日志均直接保存在 `.../20260808/` 持久目录（clean build 根目录为 `clean-build-b9dee96/`）；没有新的日志依赖外部 `/tmp`。
-- 分支历史中的 `c341e512600e673ca23fb73b377a4a8052d1b3a1`（短哈希 `c341e51`）仅修改 `AGENTS.md`、`agent/task_templates/task-contract.yml`、`docs/multi-agent-development.md`，不属于 PSRH-042 授权交付范围；未改写历史，整分支合并前需 Human Lead 单独接受或由有权限者拆分。
+- 分支历史中的 `c341e512600e673ca23fb73b377a4a8052d1b3a1`（短哈希 `c341e51`）仅修改 `AGENTS.md`、`agent/task_templates/task-contract.yml`、`docs/multi-agent-development.md`，仍不属于 PSRH-042 功能交付范围；Human Lead 已于 2026-08-09 单独接受该协作/治理提交，因此不再构成合并阻塞。未改写历史。
 - 恢复出厂曾获明确授权并执行；5 分钟 HIL 镜像也获明确授权并烧录，但未执行 `erase-flash`。烧录后未再次擦除 NVS 或重新 commissioning。
 - 当前文件的格式检查：`git diff --check` 通过。
