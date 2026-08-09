@@ -1,6 +1,6 @@
 task_id: "PSRH-044"
 title: "Documentation and career-material closeout"
-status: "VERIFYING" # 文档交付完成，等待独立 Reviewer 审查
+status: "READY_TO_MERGE" # 独立 Reviewer PASS，Human Lead 已明确接受
 goal: "完成项目文档、测试证据索引和中英文求职材料收口；所有职业陈述均绑定现有提交与证据，不扩大已完成范围"
 builder_lead: "Human Lead"
 owner: "Codex (Builder AI)"
@@ -71,10 +71,23 @@ forbidden:
   - "Commit credentials, setup payloads, private keys, MAC addresses, complete addresses, raw logs, or controller storage"
 
 independent_review:
-  conclusion: "PENDING"
+  conclusion: "PASS"
   reviewer: "gpt-5.6-sol"
+  reviewed_commit: "ff7e60c2a691755f7bae6bb7b6919ed7653b8ee5"
+  reviewed_at: "2026-08-09"
   scope: "Changed documentation, task-status transitions, repository-relative links, quantitative traceability, historical evidence boundaries, and exclusion compliance"
-  note: "Builder has prepared the handoff and performed mechanical checks; an independent Reviewer must decide whether the documentation closeout is acceptable"
+  findings:
+    - "Initial review of aee610d requested restoration of the T01-T20 executable test definitions."
+    - "Initial review requested explicit top-level disclosure of the T08, T11, T13, and T20 boundaries."
+    - "Follow-up ff7e60c restored all 20 definitions and added consistent README, closeout, resume, and test-index disclosures."
+  verification: "YAML, repository-relative links, diff whitespace, changed-path scope, quantitative traceability, sensitive-content scan, and clean worktree PASS; no firmware, test implementation, build, flash, HIL, or hardware action was required."
+  disposition: "No blocking findings remain. Independent review PASS is bound to ff7e60c and the existing PSRH-042/043 evidence boundaries."
+
+human_lead_acceptance:
+  accepted: true
+  accepted_by: "Human Lead (explicit user acceptance)"
+  accepted_at: "2026-08-09"
+  disposition: "Accepted for READY_TO_MERGE as a documentation-only closeout. Any implementation, evidence, quantitative-claim, or scope change requires fresh review."
 
 approval:
   required: true

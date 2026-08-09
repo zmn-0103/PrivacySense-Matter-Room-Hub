@@ -14,7 +14,7 @@ PrivacySense Matter Room Hub 是一个基于 ESP32-C6 的无摄像头房间状�
 |---|---|---|
 | PSRH-042 Matter API compatibility | **DONE** | 独立 Reviewer PASS；Human Lead 接受 T14/T17/T19 和设备重启 EP1/EP2 配对证据的 PARTIAL 边界，见 [任务契约](agent/tasks/PSRH-042.yml) 和 [handoff](tests/evidence/PSRH-042_builder_handoff.md)。 |
 | PSRH-043 reliability/resource closure | **DONE** | 独立 Reviewer PASS；Human Lead 接受集成构建、资源和授权 HIL 收口，见 [任务契约](agent/tasks/PSRH-043.yml) 和 [handoff](tests/evidence/PSRH-043_builder_handoff.md)。 |
-| PSRH-044 documentation/career closeout | **VERIFYING** | 文档-only 分支；等待独立 Reviewer 审查，见 [任务契约](agent/tasks/PSRH-044.yml)。 |
+| PSRH-044 documentation/career closeout | **READY_TO_MERGE** | 独立 Reviewer 对 `ff7e60c` 复审 PASS，Human Lead 已明确接受；见 [任务契约](agent/tasks/PSRH-044.yml)。 |
 
 PSRH-044 从指定基线 [`e1db746`](https://github.com/zmn-0103/PrivacySense-Matter-Room-Hub/commit/e1db746171498be76770e5a7b2ab4456017c2ef5)
 创建，明确不修改固件或测试实现，不重跑构建、烧录、HIL、T01/T02/T18，
@@ -115,5 +115,5 @@ PrivacySense-Matter-Room-Hub/
 
 开发遵循“任务契约 → 隔离实现 → 机器验证 → 独立 Reviewer → Human Lead 决定”的
 流程。具体边界见 [AGENTS.md](AGENTS.md) 和[多 Agent 协作流程](docs/multi-agent-development.md)。
-PSRH-044 的剩余门槛是文档链接、格式、事实一致性和独立 Reviewer 审查；它不
-触发新的固件构建或硬件验证。
+PSRH-044 的文档链接、格式、事实一致性和独立 Reviewer 审查均已完成，Human
+Lead 已明确接受；它没有触发新的固件构建或硬件验证，当前可进行收口合并。

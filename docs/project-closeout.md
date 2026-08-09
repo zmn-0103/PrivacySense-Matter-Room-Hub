@@ -14,8 +14,8 @@ PSRH-042 和 PSRH-043 的实现、构建、测试、资源和 HIL 证据已在�
 的结论。
 
 PSRH-044 本身只新增/更新任务记录、项目文档、求职材料和测试索引。链接、
-格式和事实一致性检查完成后，交由独立 Reviewer 审查；Builder 不自行伪造或
-代替 Reviewer 的结论。
+格式和事实一致性检查完成后，由独立 Reviewer 对 `ff7e60c` 复审并给出 PASS；
+Human Lead 随后明确接受。Builder 未自行伪造或代替 Reviewer 的结论。
 
 ## 2. Human Lead 的 Phase 6 决定
 
@@ -45,7 +45,7 @@ PSRH-044 本身只新增/更新任务记录、项目文档、求职材料和测�
 |---|---|---|---|
 | PSRH-042 | **DONE** | `gpt-5.6-sol` PASS；Human Lead 于 2026-08-09 接受 | T14、T17、T19 和设备重启后的 EP1/EP2 配对证据仍是 PARTIAL；见 [契约](../agent/tasks/PSRH-042.yml) |
 | PSRH-043 | **DONE** | `gpt-5.6-sol` PASS；Human Lead 于 2026-08-09 接受 | 绑定精确 App BIN 与三套 external manifest；见 [契约](../agent/tasks/PSRH-043.yml) |
-| PSRH-044 | **VERIFYING** | Builder 机械检查完成后等待独立 Reviewer | 不新增运行验证；见 [契约](../agent/tasks/PSRH-044.yml) |
+| PSRH-044 | **READY_TO_MERGE** | `gpt-5.6-sol` 对 `ff7e60c` 复审 PASS；Human Lead 于 2026-08-09 接受 | 不新增运行验证；见 [契约](../agent/tasks/PSRH-044.yml) |
 
 PSRH-042 的 handoff 和 PSRH-043 的 HIL 文件中保留了它们在各自时间点的
 `READY_TO_MERGE` 表述。这些是历史记录，不与当前任务契约的 `DONE` 冲突；
@@ -164,6 +164,15 @@ passed”“zero warnings”或“product-grade”。
 | firmware、Host 测试实现、已有 evidence、hardware 变更 | **PASS**；无变更 |
 | 新构建、flash、HIL、T01/T02/T18 或硬件操作 | **未执行**；按 PSRH-044 明确排除 |
 
+### Independent Reviewer 与 Human Lead 收口（2026-08-09）
+
+- 初审 `aee610d`：`REQUEST_CHANGES`，要求恢复 T01–T20 可执行测试规范，并在
+  顶层材料明确披露 T08、T11、T13、T20 边界。
+- 修复提交 `ff7e60c`：20 个测试定义完整恢复，四项限制在 README、项目收口、
+  求职材料和测试索引中一致披露。
+- 独立 Reviewer 最终结论：**PASS**。
+- Human Lead：**ACCEPTED**，任务推进到 `READY_TO_MERGE`。
+
 PSRH-044 不需要，也不授权新的 `idf.py`、`ninja`、Host 测试、烧录、串口占用
-或 HIL 操作。Reviewer 的结论在审查前保持 `PENDING`；Builder 不把本文件当作
-独立审查签名。
+或 HIL 操作。本结论只覆盖文档和既有证据引用；任何实现、证据、量化陈述或
+范围变化都需要重新审查。

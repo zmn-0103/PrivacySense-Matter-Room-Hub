@@ -120,7 +120,7 @@ App BIN SHA-256：
 1. changed-file scope 检查；
 2. Markdown 相对链接检查；
 3. `git diff --check` 和事实/数字/状态交叉检查；
-4. 独立 Reviewer 审查。
+4. 独立 Reviewer 审查：`ff7e60c` 最终复审 **PASS**，Human Lead 已明确接受。
 
 不执行构建、Host 测试、flash、HIL、T01/T02/T18 或任何硬件操作。
 
