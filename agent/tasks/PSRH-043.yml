@@ -20,6 +20,7 @@ owned_paths:
   - "tests/host/test_health_diag.c"
   - "tests/evidence/PSRH-043_*.md"
   - "docs/session-summary-20260808-psrh-043.md"
+  - "docs/session-output-20260809-psrh-043.md"
   - "tools/phase5_*"
 
 read_only_paths:
@@ -101,6 +102,7 @@ review_scope:
 delivery_metadata:
   task_contract: "agent/tasks/PSRH-043.yml"
   session_summary: "docs/session-summary-20260808-psrh-043.md"
+  session_output: "docs/session-output-20260809-psrh-043.md"
   evidence_glob: "tests/evidence/PSRH-043_*.md"
   integration_head_at_build: "0d403f13ec0a0e4b2c32e16f35893f987606ae1d"
   firmware_merge_commit: "c2a0ff09d70775a9d582bb3e8a71e455cfb49529"
