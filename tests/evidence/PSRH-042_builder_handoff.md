@@ -8,6 +8,7 @@
 - Fixed independent review target: `2392a3b54564fcc270faa54d98bbdc7e3d923298`, `b9dee960936e61b136ffb19598abd21ae9f456f2`, `54014834049fb44e7f3564e40b334b438a3bd10c`, `587243575138a3983c6658c4eb991d89ffa1de2f`, `5d2e356312b998b3f22a3f6b4855b49632756e51`, `6f498dffdd38eeaea257b9e6f23597bb2b45731b`, reviewer-remediation implementation `2f5d58379360d759aa4c6ffd8c5574ff247c2cf5`, frozen-state metadata `560734bd254ac1953327149a787b5525c3229648`, historical HIL evidence `87a3f4157630ed639e3f7d99fe70079fc3e51684` (superseded), authoritative production HIL evidence `0dda51d4aeef2a1717445dcb96c462094b8ed1ec`, and reviewed final HEAD `7ebb6eec5f40d9f95a02e2dc1119887c4f0f3aee`.
 - Roles: builder lead `gpt-5.6-terra`; builder `gpt-5.6-luna` with reasoning effort `max`; independent reviewer `gpt-5.6-sol`.
 - Independent review status: **PASS** (`gpt-5.6-sol`, 2026-08-09). The conclusion is bound to branch `agent/psrh-042-matter-v15`, reviewed HEAD `7ebb6eec5f40d9f95a02e2dc1119887c4f0f3aee`, implementation `2f5d58379360d759aa4c6ffd8c5574ff247c2cf5`, and authoritative production HIL evidence `0dda51d4aeef2a1717445dcb96c462094b8ed1ec`. The historical `REQUEST_CHANGES` and `87a3f415` evidence are superseded; Builder does not self-certify this PASS.
+- Human Lead acceptance: **ACCEPTED** (explicit user approval, 2026-08-09). T14, T17, T19, and the device-restart EP1/EP2 evidence boundaries remain recorded as PARTIAL and are accepted as stated for `READY_TO_MERGE` / integration.
 - Explicitly excluded from PSRH-042 functional delivery, but separately accepted by Human Lead on 2026-08-09: `c341e512600e673ca23fb73b377a4a8052d1b3a1` / `c341e51` (collaboration/governance documentation).
 - Final implementation commit: `2f5d58379360d759aa4c6ffd8c5574ff247c2cf5` — addresses the four independent-review findings: controller request lifetime, atomic FORCE_SYNC generation, explicit HIL/release build gate, and retry-safe HIL exit state.
 - New Fabric HIL follow-up commit: `5d2e356` — adds the opt-in five-minute NIGHT exit test variant and binds the sanitized HIL acceptance results recorded below.
@@ -113,7 +114,7 @@ and bound to authoritative evidence commit `0dda51d4`.
 The independent Reviewer conclusion is **PASS**, bound to reviewed HEAD
 `7ebb6eec5f40d9f95a02e2dc1119887c4f0f3aee`, implementation `2f5d583`, and
 authoritative HIL evidence `0dda51d4aeef2a1717445dcb96c462094b8ed1ec`.
-The task is now `REVIEWER_PASS`, but it must not enter `READY_TO_MERGE` until
-Human Lead explicitly accepts the remaining T14, T17, T19, and device-restart
-EP1/EP2 evidence boundaries. Any firmware change or post-review integration
-merge requires a fresh review of the resulting HEAD.
+Human Lead has explicitly accepted the remaining T14, T17, T19, and
+device-restart EP1/EP2 evidence boundaries as recorded PARTIAL items. The task
+is now `READY_TO_MERGE` and may proceed to integration. Any firmware change or
+post-review integration merge requires a fresh review of the resulting HEAD.

@@ -1,6 +1,6 @@
 task_id: "PSRH-042"
 title: "Matter API compatibility on ESP-Matter release/v1.5"
-status: "REVIEWER_PASS" # 独立 Reviewer 已通过；等待 Human Lead 接受剩余证据边界
+status: "READY_TO_MERGE" # 独立 Reviewer PASS，Human Lead 已接受剩余证据边界
 goal: "在锁定的 ESP-Matter release/v1.5 上完成 Matter API 兼容、保持 EP0/EP1/EP2 数据模型不变，并产生构建/size/测试证据"
 builder_lead: "gpt-5.6-terra"
 owner: "gpt-5.6-luna"
@@ -129,7 +129,18 @@ independent_review:
   superseded_evidence_commit: "87a3f4157630ed639e3f7d99fe70079fc3e51684"
   reviewed_at: "2026-08-09"
   scope: "No new blocking issues; production default, HIL/CMake isolation, retry-safe exit, request lifetime, FORCE_SYNC generation, request-slot reuse, production-image HIL, image hashes, diff hygiene, firmware freeze, and clean worktree accepted."
-  gate: "Human Lead must explicitly accept T14, T17, T19, and the device-restart EP1/EP2 evidence boundary before READY_TO_MERGE or integration."
+  gate: "Satisfied by the explicit Human Lead acceptance recorded below; no firmware change is covered by this metadata closeout."
+
+human_lead_acceptance:
+  accepted: true
+  accepted_by: "Human Lead (explicit user approval)"
+  accepted_at: "2026-08-09"
+  accepted_boundaries:
+    - "T14 remains PARTIAL at the retained-evidence boundary: operational CASE/reads are proven, but the raw PASE/NOC success chain is not retained."
+    - "T17 remains PARTIAL at the retained-evidence boundary: automatic exit and post-exit CurrentMode are captured, but automatic entry is not separately captured."
+    - "T19 remains PARTIAL at the retained-evidence boundary: offline local transition is captured, but post-recovery latest-value read was not verified."
+    - "Device restart EP1/EP2 evidence remains PARTIAL because the post-restart pair was not both retained."
+  disposition: "Accepted for READY_TO_MERGE / integration with the stated evidence boundaries; later firmware changes or integration conflicts require fresh review."
 
 required_evidence:
   - "builder_handoff"
