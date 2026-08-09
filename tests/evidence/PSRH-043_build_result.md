@@ -16,7 +16,7 @@
 - Controlled artifact root:
   /home/administrator/Project/PrivacySense-Matter-Room-Hub-artifacts/psrh-043-phase5-integration/20260809/closeout/integrated-c2a0ff0
 - Top-level evidence manifest SHA-256:
-  77b3bdb14380e6c508c803179a8329bb1ff40c8d533af4a0ce2060d44770e6be
+  929d47f7d0e176b8611cddf3c31016e0440e2590de1a51bc40470d704036d143
 
 ## Integration handling
 
@@ -98,8 +98,10 @@ The integrated app artifact identity is:
 | privacy-sense-matter-room-hub.elf | c56bd237359ec34685d2c795a72ea4a1be30c9477694648f69e3dddf198572cc |
 | privacy-sense-matter-room-hub.map | 1bf52bcdd61265757f8b4f839c32a2f877ed089ff466260acb2e69b64f5fab7f |
 
-Hardware Lab must flash this exact BIN hash and bind its serial/HIL logs to
-the same artifact manifest.
+Hardware Lab flashed this exact BIN hash. The sanitized flash transcript is
+`integrated-c2a0ff0/hil-flash.log`, SHA-256
+`8b84eef08f8ed1ae133eb8d0751e2e042dbb1fda270dd70c3a331f5b4bb47719`, and all
+HIL logs are bound to the same top-level artifact manifest.
 
 ## Warning result
 
@@ -110,5 +112,7 @@ network.c command_is_link_event unused warning is absent after integration.
 The project CMake compatibility warning and upstream ESP-Matter/ConnectedHomeIP
 and Kconfig warnings remain visible and are not suppressed.
 
-This is a successful static integrated build result. Runtime resource,
-protocol, and Hardware Lab evidence remain hard gates.
+This is a successful static integrated build result. The runtime resource
+snapshot gate is now evidenced as PASS; protocol, sensor-recovery, controlled
+Wi-Fi-disconnect, and power-cycle HIL remain open. See
+PSRH-043_hardware_deferral.md; the task remains INTEGRATION.

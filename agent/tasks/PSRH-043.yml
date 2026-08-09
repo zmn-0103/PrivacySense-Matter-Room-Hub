@@ -59,8 +59,26 @@ integration_verification:
   integration_head_at_build: "0d403f13ec0a0e4b2c32e16f35893f987606ae1d"
   artifact_root: "/home/administrator/Project/PrivacySense-Matter-Room-Hub-artifacts/psrh-043-phase5-integration/20260809/closeout"
   artifact_manifest: "evidence-files.sha256"
-  artifact_manifest_sha256: "77b3bdb14380e6c508c803179a8329bb1ff40c8d533af4a0ce2060d44770e6be"
-  result: "Fresh compatible baseline and integrated ESP32-C6 build/size PASS with corrected delta; runtime/HIL remains a hard gate; independent Reviewer assignment/review and Human Lead acceptance remain pending."
+  artifact_manifest_sha256: "929d47f7d0e176b8611cddf3c31016e0440e2590de1a51bc40470d704036d143"
+  result: "Fresh compatible baseline and integrated ESP32-C6 build/size PASS with corrected delta; exact-BIN runtime snapshots PASS with tasks/captured within capacity and truncated=no; DHT22 recovery, controlled Wi-Fi disconnect/recovery, verified power-cycle, remaining BLE commissioning scope, independent Reviewer assignment/review, and Human Lead acceptance remain pending."
+  hil_verification:
+    status: "PARTIAL; task remains INTEGRATION"
+    app_bin_sha256: "3496c18164cb3410a3e19d83a6a1357151b4cea8ca20840f4492b58a8f81294c"
+    app_elf_sha256: "c56bd237359ec34685d2c795a72ea4a1be30c9477694648f69e3dddf198572cc"
+    app_map_sha256: "1bf52bcdd61265757f8b4f839c32a2f877ed089ff466260acb2e69b64f5fab7f"
+    flash_log: "integrated-c2a0ff0/hil-flash.log"
+    flash_log_sha256: "8b84eef08f8ed1ae133eb8d0751e2e042dbb1fda270dd70c3a331f5b4bb47719"
+    primary_runtime_log: "integrated-c2a0ff0/hil-runtime-02.log"
+    primary_runtime_log_sha256: "624ddcd33ad6440b8057bbaaaf17f3de64c946506132f88217368edc2ff19c7a"
+    recovery_runtime_log: "integrated-c2a0ff0/hil-runtime-recovery-01.log"
+    recovery_runtime_log_sha256: "6969a14b3cf8d7e572ff11f7ecf149a4f8ea900ff3544612301cb960e2d76cce"
+    runtime_snapshot_gate: "PASS; boot/tasks_ready/network_periodic captured; tasks<=32; captured==tasks; truncated=no"
+    matter_smoke: "PASS; Occupancy=1; CurrentMode NORMAL=0; ModeSelect QUIET=1 then NORMAL=0"
+    matter_controller_recovery: "PASS after ordinary reset using same persistent controller storage"
+    wifi: "PARTIAL; startup disconnect/reconnect observed, controlled post-connected AP disconnect not captured"
+    dht22: "FAIL/NOT_CAPTURED; repeated parse failures, no valid sample or recovery"
+    ble: "PARTIAL; BLE startup/sync/deinit observed, re-commissioning not repeated"
+    power_cycle: "NOT_CAPTURED; no controlled power relay"
 
 review_scope:
   included:
@@ -88,6 +106,8 @@ delivery_metadata:
   firmware_merge_commit: "c2a0ff09d70775a9d582bb3e8a71e455cfb49529"
   external_artifact_root: "/home/administrator/Project/PrivacySense-Matter-Room-Hub-artifacts/psrh-043-phase5-integration/20260809/closeout"
   external_manifest: "evidence-files.sha256"
+  external_manifest_sha256: "929d47f7d0e176b8611cddf3c31016e0440e2590de1a51bc40470d704036d143"
+  hil_evidence: "tests/evidence/PSRH-043_hardware_deferral.md"
 
 acceptance:
   - "Remove or explicitly classify project-owned build warnings in the owned paths without suppressing compiler diagnostics"

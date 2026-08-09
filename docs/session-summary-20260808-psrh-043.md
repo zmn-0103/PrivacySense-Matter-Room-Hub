@@ -12,7 +12,7 @@
 - Firmware merge：c2a0ff09d70775a9d582bb3e8a71e455cfb49529
 - Fresh integrated build HEAD：0d403f13ec0a0e4b2c32e16f35893f987606ae1d
 - 当前状态：INTEGRATION
-- 静态集成、Host、目标构建和资源测量已通过；运行时/HIL 是硬门禁
+- 静态集成、Host、目标构建、资源测量和运行时有界快照已通过；协议/传感器/电源 HIL 仍是硬门禁
 - 未合并到 main，未 push，未创建 PR
 
 本文件由任务契约的 owned_paths 和 delivery_metadata 明确声明。任务契约、
@@ -29,7 +29,7 @@
 - 不修改 firmware/main/matter_app.cpp 或 firmware/main/state_machine.c；
 - 不引入 PSRH-042 未提交代码；
 - 不修改 watchdog、OTA、分区、复位、安全策略或离线行为；
-- 不烧录、不宣称未执行的硬件测试为 PASS；
+- 未经授权不烧录；已授权的本轮 HIL 只记录实际结果，不宣称未执行的硬件测试为 PASS；
 - 仅只读查看 PSRH-042 分支，不修改其 Worktree。
 
 两次 fresh 构建均使用相同工具链和命令：
@@ -90,7 +90,7 @@ PSRH-043 同时移除了 baseline 中 network.c 的无调用 command_is_link_eve
 均保存在该目录。顶层 evidence-files.sha256 的 SHA-256 为：
 
 ~~~text
-77b3bdb14380e6c508c803179a8329bb1ff40c8d533af4a0ce2060d44770e6be
+929d47f7d0e176b8611cddf3c31016e0440e2590de1a51bc40470d704036d143
 ~~~
 
 ## 资源增量
@@ -134,19 +134,39 @@ warning 证据来自保留日志而非只看 exit code：
 
 ## Runtime/HIL 硬门禁
 
-本 integration worktree 没有板卡、串口、调试器或硬件租约，因此以下字段
-均为 NOT_CAPTURED，不得解释为 PASS：
+本轮已在授权 Hardware Lab 使用精确 App BIN
+`3496c18164cb3410a3e19d83a6a1357151b4cea8ca20840f4492b58a8f81294c` 烧录。
+烧录日志 `integrated-c2a0ff0/hil-flash.log` SHA-256 为
+`8b84eef08f8ed1ae133eb8d0751e2e042dbb1fda270dd70c3a331f5b4bb47719`；四个
+区域均报告 `Hash of data verified`，应用写入 1,906,400 B，exit 0。
 
-- boot、tasks_ready、network_periodic；
-- tasks <= 32、captured == tasks、truncated=no；
-- free_heap、minimum_free_heap、各任务 HWM；
-- 周期诊断期间无 TWDT、panic、protocol timeout；
-- Wi-Fi、传感器、Matter/BLE smoke/recovery；
-- power-cycle 和 watchdog observation。
+主要串口日志 `hil-runtime-02.log` SHA-256 为
+`624ddcd33ad6440b8057bbaaaf17f3de64c946506132f88217368edc2ff19c7a`。它捕获：
 
-Hardware Lab 必须使用上述精确 integrated App BIN hash，并把脱敏串口/HIL
-日志与 evidence-files.sha256 绑定。若真实采集 truncated=yes，必须先修正
-诊断容量、重新构建同一流程并重测，不能继续验收。
+| 快照 | tasks/captured | capacity | truncated | free heap | min-free heap | min HWM |
+|---|---:|---:|---|---:|---:|---:|
+| boot | 4/4 | 32 | no | 272460 | 272460 | 1648 B |
+| tasks_ready | 17/17 | 32 | no | 134912 | 119336 | 1156 B |
+| network_periodic（约 32 s） | 16/16 | 32 | no | 139660 | 119340 | 1276 B |
+| network_periodic（约 62 s） | 16/16 | 32 | no | 139660 | 119340 | 1276 B |
+| network_periodic（约 92 s） | 16/16 | 32 | no | 139468 | 119340 | 1276 B |
 
-因此当前只能确认静态集成和目标构建通过；阶段 5 尚未 fully PASS。独立
-Reviewer、Human Lead 和授权 Hardware Lab 证据仍是后续门禁。
+所有任务身份和 HWM 已在 `tests/evidence/PSRH-043_resource_measurement.md`
+及原始脱敏日志中登记。周期诊断期间未见 TWDT failure、panic、Guru
+Meditation、abort、stack overflow 或 protocol timeout；`ingress_overruns=0`。
+普通复位后的恢复日志 `hil-runtime-recovery-01.log` SHA-256 为
+`6969a14b3cf8d7e572ff11f7ecf149a4f8ea900ff3544612301cb960e2d76cce`，同样捕获
+完整 boot/tasks_ready/network_periodic 且均为未截断。
+
+协议结果：
+
+- Wi-Fi 启动阶段观察到断开后重新获 IP、状态恢复为 connected，并发布 Matter mDNS；未执行受控的已连接状态 AP 断开，因此该子门禁为 PARTIAL。
+- LD2410C radar heartbeat 正常；DHT22 连续 parse fail 并达到 3 次失败阈值，未得到有效样本，也未捕获恢复，故环境传感器 normal/recovery 为 FAIL/NOT_CAPTURED。
+- 同一持久化 controller storage 的 Matter EP1 Occupancy 读取为 `1`，EP2 CurrentMode 读取为 `0`；ModeSelect `NORMAL → QUIET → NORMAL` 回读 `1 → 0`；普通复位后两项再次读取成功。
+- BLE host sync、commissioning-ready 启动、已 commission 后停止 advertising 以及 BLE deinit/memory reclaim 已观察；未执行需要 factory reset/setup payload 的重新 commissioning。
+- 当前 USB/RTS 普通复位不等于已验证的 power-cycle，实验室没有受控电源继电器，因此 power-cycle recovery 为 NOT_CAPTURED。
+
+Runtime resource gate 已 PASS，但整体 HIL 尚未闭环。若后续任何真实采集出现
+`truncated=yes`，必须修正容量、重新构建并用新精确 BIN 重测，不能继续验收。
+阶段 5 仍为 `INTEGRATION`；独立 Reviewer、Human Lead，以及 DHT22 recovery、
+受控 Wi-Fi disconnect/recovery 和 power-cycle 证据仍是最终门禁。

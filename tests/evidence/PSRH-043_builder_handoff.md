@@ -35,7 +35,7 @@ The task contract explicitly declares the following delivery metadata:
   /home/administrator/Project/PrivacySense-Matter-Room-Hub-artifacts/psrh-043-phase5-integration/20260809/closeout
 - external manifest:
   evidence-files.sha256, SHA-256
-  77b3bdb14380e6c508c803179a8329bb1ff40c8d533af4a0ce2060d44770e6be
+  929d47f7d0e176b8611cddf3c31016e0440e2590de1a51bc40470d704036d143
 
 The review includes the owned implementation paths only. The PSRH-042
 Matter/state-machine files, approved interfaces/data-model documents, and
@@ -75,7 +75,7 @@ compatibility and upstream dependency warnings remain visible and classified.
 | Fresh integrated target build | PASS; exit 0; 1498/1498 | build.log SHA-256 ebe350c91427e667073ffaee4f4c396e27915860f45e7c7196297b935ede4ad9 |
 | Integrated size | PASS; exit 0 | size.log SHA-256 198e392157edb27a9f4d16f2fa1b3d32b92d87f3c810326edaf7dc81fa648b45 |
 | Warning classification | PASS as classification; no suppression | warning-classification.log SHA-256 496f164a30a7bf2cb029ba2c36db9c0f1753607b9aaa6f226a5ffaea15623d22 |
-| Hardware/runtime HIL | DEFERRED; hard gate | PSRH-043_hardware_deferral.md |
+| Hardware/runtime HIL | PARTIAL; runtime resource gate PASS, protocol/sensor/power gates remain open | PSRH-043_hardware_deferral.md; external HIL logs |
 
 The compatible baseline was rebuilt with the same fresh flow. Its App BIN is
 0x1d1120, not the earlier unbound 0x1d0d80 value. Baseline build and size
@@ -102,15 +102,44 @@ c56bd237359ec34685d2c795a72ea4a1be30c9477694648f69e3dddf198572cc
 Integrated App MAP:
 1bf52bcdd61265757f8b4f839c32a2f877ed089ff466260acb2e69b64f5fab7f
 
-Hardware Lab must flash the exact integrated BIN hash above and bind every
-runtime/HIL log to the external evidence manifest.
+Hardware Lab flashed the exact integrated BIN hash above and bound every
+runtime/HIL log to the external evidence manifest. The flash transcript is
+`integrated-c2a0ff0/hil-flash.log`, SHA-256
+`8b84eef08f8ed1ae133eb8d0751e2e042dbb1fda270dd70c3a331f5b4bb47719`.
+
+The primary 100-second serial log is
+`integrated-c2a0ff0/hil-runtime-02.log`, SHA-256
+`624ddcd33ad6440b8057bbaaaf17f3de64c946506132f88217368edc2ff19c7a`.
+It captured `boot`, `tasks_ready`, and three `network_periodic` snapshots;
+all were `truncated=no`, with `tasks/captured` of `4/4`, `17/17`, and
+`16/16`. The ordinary-reset recovery serial log is
+`integrated-c2a0ff0/hil-runtime-recovery-01.log`, SHA-256
+`6969a14b3cf8d7e572ff11f7ecf149a4f8ea900ff3544612301cb960e2d76cce`.
+
+Matter smoke and controller recovery passed using the same persistent storage:
+EP1 Occupancy read `1`, EP2 CurrentMode read `0`, and the controlled
+ModeSelect sequence read `1` for QUIET and `0` after restoration to NORMAL.
+The serial logs show Wi-Fi startup disconnect/reconnect and Matter mDNS
+publication, but no controlled post-connected Wi-Fi disconnect was available.
+DHT22 produced repeated parse failures with no valid sample/recovery, and the
+lab topology had no verified power-cycle control. BLE startup/synchronization
+and post-commissioning deinit were observed; re-commissioning was not repeated
+without a separately authorized factory-reset/setup-payload flow.
+
+The task therefore remains `INTEGRATION`: static build/resource evidence and
+the bounded runtime snapshot gate are PASS, while the remaining HIL gates and
+independent Reviewer/Human Lead acceptance are pending. The complete list of
+sanitized HIL log hashes is in `PSRH-043_hardware_deferral.md` and the
+top-level external manifest.
 
 ## Handoff disposition
 
-Static integrated build, Host tests, warning classification, and corrected
-resource measurement are PASS for the integration check. The task remains
-INTEGRATION: independent Reviewer assessment, Human Lead acceptance, and the
-runtime/HIL fields in PSRH-043_hardware_deferral.md are still required. If
-the HIL snapshot reports truncated=yes, the diagnostic capacity must be
-fixed and the image rebuilt before acceptance. This handoff does not declare
-Phase 5 fully PASS, merge to main, push, or create a PR.
+Static integrated build, Host tests, warning classification, corrected
+resource measurement, and the bounded runtime snapshot gate are PASS for the
+integration check. The task remains INTEGRATION: DHT22 normal/recovery,
+controlled Wi-Fi disconnect/recovery, verified power-cycle recovery, any
+required BLE commissioning cycle, independent Reviewer assessment, and Human
+Lead acceptance are still required. If a future HIL snapshot reports
+truncated=yes, the diagnostic capacity must be fixed and the image rebuilt
+before acceptance. This handoff does not declare Phase 5 fully PASS, merge to
+main, push, or create a PR.

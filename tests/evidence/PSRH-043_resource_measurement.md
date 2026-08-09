@@ -14,7 +14,7 @@
 - Controlled external artifact root:
   /home/administrator/Project/PrivacySense-Matter-Room-Hub-artifacts/psrh-043-phase5-integration/20260809/closeout
 - Artifact manifest: evidence-files.sha256; SHA-256
-  77b3bdb14380e6c508c803179a8329bb1ff40c8d533af4a0ce2060d44770e6be
+  929d47f7d0e176b8611cddf3c31016e0440e2590de1a51bc40470d704036d143
 
 The baseline and integrated builds used the same fresh set-target +
 reconfigure + ninja -j2 all + idf.py size flow. The temporary build
@@ -92,8 +92,8 @@ remain 6144 (state machine), 3072 (button), 3072 (UI), 8192 (network),
 
 ## Artifact identity
 
-The app artifacts are retained outside the repository and are the only images
-eligible for the later HIL flash step.
+The app artifacts are retained outside the repository and were the only images
+eligible for, and used by, the authorized HIL flash step.
 
 | Image | Baseline SHA-256 | Integrated SHA-256 |
 |---|---|---|
@@ -103,12 +103,58 @@ eligible for the later HIL flash step.
 
 Bootloader, partition table, OTA data, and their hashes are in each
 artifacts.sha256 file and the top-level evidence-files.sha256 manifest.
-The integrated app BIN hash above must be recorded by Hardware Lab before
-flashing and must match the image used for all runtime/HIL evidence.
+The integrated app BIN hash above was recorded by Hardware Lab before flashing
+and matches the image used for all runtime/HIL evidence.
 
 ## Runtime and hardware evidence
 
-Static measurement is complete. Runtime resource and protocol evidence is not
-captured in this integration worktree and remains a hard gate; see
-PSRH-043_hardware_deferral.md. No runtime PASS is inferred from the static
-ELF/map measurements.
+The authorized Hardware Lab flash used the exact integrated App BIN above;
+`integrated-c2a0ff0/hil-flash.log` records four `Hash of data verified` results,
+application write size 1,906,400 bytes, and flasher exit 0. Its SHA-256 is
+`8b84eef08f8ed1ae133eb8d0751e2e042dbb1fda270dd70c3a331f5b4bb47719`.
+
+The primary serial capture (`hil-runtime-02.log`, SHA-256
+`624ddcd33ad6440b8057bbaaaf17f3de64c946506132f88217368edc2ff19c7a`) and the
+ordinary-reset recovery capture (`hil-runtime-recovery-01.log`, SHA-256
+`6969a14b3cf8d7e572ff11f7ecf149a4f8ea900ff3544612301cb960e2d76cce`) report:
+
+| Snapshot | tasks/captured | capacity | truncated | free heap | minimum free heap | minimum task HWM |
+|---|---:|---:|---|---:|---:|---:|
+| boot | 4/4 | 32 | no | 272460 | 272460 | 1648 B |
+| tasks_ready | 17/17 | 32 | no | 134912 | 119336 | 1156 B |
+| network_periodic (~32 s) | 16/16 | 32 | no | 139660 | 119340 | 1276 B |
+| network_periodic (~62 s) | 16/16 | 32 | no | 139660 | 119340 | 1276 B |
+| network_periodic (~92 s) | 16/16 | 32 | no | 139468 | 119340 | 1276 B |
+| recovery boot | 4/4 | 32 | no | 272460 | 272460 | 1648 B |
+| recovery tasks_ready | 17/17 | 32 | no | 134808 | 119236 | 1276 B |
+| recovery network_periodic | 16/16 | 32 | no | 139348 | 119256 | 1268 B |
+
+The complete HWM identities for the primary acceptance snapshots are retained
+here so the resource gate is independently reviewable:
+
+~~~text
+boot: main=2320, IDLE=1648, Tmr Svc=1728, esp_timer=3788
+tasks_ready: main=1156, IDLE=1600, tiT=2988, sensor_radar=2128,
+sensor_env=2356, state_machine=4284, button=1384, network=6420,
+matter_adapt=10544, config=2344, CHIP=4884, Tmr Svc=1728,
+ui=1332, esp_timer=3644, console_repl=3292, sys_evt=3076,
+wifi=4152
+network_periodic (~32 s): network=6364, config=2344, IDLE=1600,
+ui=1276, sensor_radar=2072, state_machine=4128, tiT=2604,
+sensor_env=2200, button=1384, CHIP=4884, Tmr Svc=1728,
+matter_adapt=10228, wifi=3724, esp_timer=3644,
+console_repl=3292, sys_evt=2920
+~~~
+
+All observed snapshots satisfy `tasks <= 32`, `captured == tasks`, and
+`truncated=no`. The periodic window had no TWDT failure, panic, abort, stack
+overflow, or protocol timeout. The non-failure framework line that stops its
+watchdog timer is retained in the serial log; watchdog policy was unchanged.
+
+Protocol/HIL is not fully closed: Matter operational/controller recovery
+passed, but DHT22 normal/recovery evidence and a controlled post-connected
+Wi-Fi disconnect are incomplete, and no verified power-cycle was available.
+See PSRH-043_hardware_deferral.md for the gate-by-gate disposition. Every
+sanitized HIL log in the integrated artifact directory is included in the
+top-level `evidence-files.sha256` manifest (42 entries; manifest SHA-256
+`929d47f7d0e176b8611cddf3c31016e0440e2590de1a51bc40470d704036d143`).
