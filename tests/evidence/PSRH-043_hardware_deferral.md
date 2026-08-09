@@ -1,30 +1,25 @@
-# PSRH-043 Sanitized Hardware Evidence / Deferral
+# PSRH-043 Integrated Hardware Evidence / Deferral
 
-- Commit under review: `9d83e4b`
-- Date: `2026-08-08`
+- Commit under review: `c2a0ff09d70775a9d582bb3e8a71e455cfb49529`
+- Date: `2026-08-09`
 - Status: **DEFERRED**
 
-No board, serial port, debugger, credentials, setup payload, MAC address, or
-raw serial log was accessed or committed in this worktree. The isolated
-PSRH-043 branch is based on `02e67aa` and does not contain the final integrated
-PSRH-042 firmware required for Matter/BLE and hardware validation.
+The integrated ESP32-C6 configure, build, and static size checks passed. No
+board, serial port, debugger, credentials, setup payload, MAC address, or raw
+serial log was accessed or committed in this worktree. No hardware lease was
+available for this integration check.
 
-The approved ESP-IDF/ESP-Matter environment was available and the target
-configure step succeeded. The application build then returned
-`VERIFY_FAILED` in the read-only PSRH-042 `firmware/main/matter_app.cpp`, so
-there is no runnable PSRH-043 application image from which to collect target
-resource logs. This is a build verification failure, not a hardware pass or a
-hardware environment `BLOCKED` result.
+The following runtime and hardware evidence remains deferred rather than
+marked PASS:
 
-The following evidence remains deferred rather than marked PASS:
-
-- ESP32-C6 boot/reset-reason capture and heap/stack measurements;
+- boot/reset-reason, current/minimum heap, and per-task stack high-water logs;
+- confirmation of the runtime task count and 32-entry truncation behavior;
 - Wi-Fi disconnect/recovery and sensor failure/recovery capture;
 - Matter/BLE commissioning and controller recovery;
 - power-cycle and watchdog-observation checks;
-- final flash/RAM/stack measurements on the integrated image.
+- final integrated-image HIL behavior and sanitized serial evidence.
 
-After the final PSRH-042 Builder commit is integrated, rerun the isolated
-ESP32-C6 build with `ninja -C <isolated-build-directory> -j2 all`, run
-`idf.py -B <isolated-build-directory> size`, capture sanitized resource logs,
-and record the hardware setup and exit/result status here.
+The static Flash/RAM and bounded-storage measurements are recorded in
+`PSRH-043_resource_measurement.md`. A separately authorized Hardware Lab run
+must collect the runtime and protocol evidence before Phase 5 is declared
+fully PASS.

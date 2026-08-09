@@ -1,9 +1,11 @@
-# PSRH-043 Warning Classification
+# PSRH-043 Integrated Warning Classification
 
-- Commit under review: `9d83e4b`
-- Date: `2026-08-08`
+- Commit under review: `c2a0ff09d70775a9d582bb3e8a71e455cfb49529`
+- Date: `2026-08-09`
+- Target command: `ninja -C /tmp/psrh-043-phase5-integration-build -j2 all`
+- Result: exit `0`
 
-## Project-owned build flags
+## Project-owned build flags and warnings
 
 The project-owned `firmware/CMakeLists.txt` no longer adds:
 
@@ -11,32 +13,26 @@ The project-owned `firmware/CMakeLists.txt` no longer adds:
 - `-Wno-format-nonliteral`
 - `-Wno-format-security`
 
-No new warning suppression was added. The approved target toolchain was used;
-the build reached application compilation but failed in the read-only
-PSRH-042 Matter file before linking.
+No new warning suppression was added. The unused project function
+`command_is_link_event()` was removed from `network.c` because it had no
+callers. The integrated target build completed without a project-owned
+compiler warning in the PSRH-043 sources.
 
-## Target warning summary
+## Warnings retained and classified
 
-Warnings observed before the compile failure were classified as follows:
+- Upstream ConnectedHomeIP/ESP-Matter camera optional-setting
+  `maybe-uninitialized` diagnostics remain visible.
+- The upstream Color Control `direction` `maybe-uninitialized` diagnostic
+  remains visible.
+- CMake compatibility/deprecation messages come from the project boilerplate
+  and upstream ESP-IDF/ESP-Matter/managed components.
+- Kconfig reports the existing duplicate `SEC_CERT_DAC_PROVIDER` choice
+  definition/default diagnostics from ESP-Matter and ConnectedHomeIP.
 
-- Existing ESP-Matter/ConnectedHomeIP warnings: camera optional settings
-  `maybe-uninitialized` diagnostics and Color Control `direction` possibly
-  uninitialized. These are upstream dependency warnings; they remain visible
-  and were not suppressed.
-- Existing CMake compatibility/deprecation warnings from the project,
-  ESP-Matter, ESP-IDF, and managed components, plus existing Kconfig choice
-  and duplicate-symbol notices. These are configuration/dependency warnings,
-  not evidence of a clean final target build.
-- The project-owned unused `command_is_link_event()` warning in `network.c`
-  was removed because it had no callers. No project-owned compiler warning was
-  observed in the PSRH-043 sources after that cleanup.
+These are upstream or dependency/configuration warnings, not reasons to hide
+compiler diagnostics. The target build linked successfully; this is a
+successful build with classified non-project warnings, not a claim that all
+upstream warnings were eliminated.
 
-Because the application did not link, this is not a final warning-free claim;
-the integrated PSRH-042 build must repeat warning capture after its Matter
-compile errors are fixed.
-
-## Verified result
-
-The Host build uses `-Wall -Wextra -Werror` and completed with exit code `0`
-and no warnings. This is Host evidence only; it does not substitute for the
-ESP32-C6 warning summary.
+The Host build separately used `-Wall -Wextra -Werror`, completed with exit
+code `0`, and emitted no warning.

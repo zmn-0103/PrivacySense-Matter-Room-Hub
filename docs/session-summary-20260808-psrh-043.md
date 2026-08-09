@@ -2,13 +2,15 @@
 
 ## 会话状态
 
-- 日期：2026-08-08
-- 分支：`agent/psrh-043-phase5-reliability`
-- Worktree：`PrivacySense-Matter-Room-Hub-worktrees/psrh-043-phase5-reliability`
-- 基线：`02e67aa`
-- 当前 HEAD：`54a9dc9`
-- 当前状态：PSRH-043 已收尾，暂停该分支修改，等待 PSRH-042 完成
-- 集成状态：未集成到 `main`
+- Builder 日期：2026-08-08；集成复测日期：2026-08-09
+- Builder 分支：`agent/psrh-043-phase5-reliability`
+- Integration 分支：`agent/psrh-043-phase5-integration`
+- Integration Worktree：`PrivacySense-Matter-Room-Hub-worktrees/psrh-043-phase5-integration`
+- Builder 基线：`02e67aa`
+- 集成基线：`5044f9f854efdd4a9da899a357682c71605ec707`
+- 集成提交：`c2a0ff09d70775a9d582bb3e8a71e455cfb49529`
+- 当前状态：集成构建与静态资源测量通过；运行时/HIL 证据延期，等待独立审查与 Human Lead 接受
+- 集成状态：已集成到独立 integration 分支，未合并到 `main`
 
 ## 工作范围与约束
 
@@ -59,13 +61,13 @@ export NINJAFLAGS=-j2
 
 ### 收尾文档与契约
 
-- `agent/tasks/PSRH-043.yml` 已提交，状态改为 `VERIFY_FAILED`；
+- `agent/tasks/PSRH-043.yml` 在 Builder 分支曾记录 `VERIFY_FAILED`；集成复测后状态为 `INTEGRATION`；
 - `firmware/README.md` 已恢复为基线内容，未保留当前电脑路径或 PSRH-043 专用构建目录；
 - `firmware/CMakeLists.txt` 已改为路径无关的占位构建说明，无本机绝对路径或任务专用目录；
 - 阶段 5 build、size、warning、resource、Host 和硬件延期证据已更新；
 - handoff 最终提交列表包含 `ef9d728` 和本次核心收尾提交 `6e6f415`，并记录 handoff 更新提交 `54a9dc9`。
 
-## 真实目标构建结果
+## Builder 分支历史目标构建结果（集成前）
 
 目标配置和构建在 `firmware/` 下使用 `/home/administrator/esp` 工具链执行。
 
@@ -80,11 +82,11 @@ idf.py -B /tmp/psrh-043-phase5-reliability-build size
 
 - `set-target esp32c6`：exit 0；
 - `reconfigure`：exit 0；GN 生成 5902 targets from 467 files；
-- `ninja ... -j2 all`：exit 1，`[1466/1498]` 在只读的 PSRH-042 `firmware/main/matter_app.cpp` 失败；
+- `ninja ... -j2 all`：exit 1，`[1466/1498]` 在当时尚未集成的只读 PSRH-042 `firmware/main/matter_app.cpp` 失败；
 - `idf.py ... size`：exit 2，因应用重复构建失败，未生成应用 ELF/map；
-- 失败分类为 `VERIFY_FAILED`，不是环境 `BLOCKED`；
+- 失败分类为 Builder 分支历史 `VERIFY_FAILED`，不是环境 `BLOCKED`；
 - bootloader 已生成：`0x5670` bytes，剩余 `0x2990` bytes（32%）；
-- 应用 Flash/RAM size 尚未获得；
+- 应用 Flash/RAM size 在当时尚未获得；该历史缺口已由集成复测补齐；
 - 失败涉及 `StaticSupportedModesManager`、Matter callback designated initializer、`ModeOptionStruct` 等 API/type 错误，未在 PSRH-043 分支修复。
 
 目标编译期间，PSRH-043 自有源文件未观察到项目自有编译告警。仍观察到的告警属于上游 ConnectedHomeIP/ESP-Matter 或现有 CMake/Kconfig 配置问题，包括 camera optional settings 的 `maybe-uninitialized`、Color Control 的 `direction` 可能未初始化，以及依赖兼容性/配置提示。
@@ -129,7 +131,31 @@ make clean && make -j2 all
 | `ef9d728` | 更新真实构建、size、warning 和资源证据 |
 | `6e6f415` | 恢复 README、清理 CMake 路径并将契约置为 `VERIFY_FAILED` |
 | `54a9dc9` | 将收尾提交 SHA 回填 handoff |
+| `c2a0ff0` | 将 PSRH-043 完整历史合并到 PSRH-042 集成基线 |
 
-## 后续边界
+## 2026-08-09 集成复测
 
-PSRH-043 当前不宣称阶段 5 PASS。待 PSRH-042 Builder 在其分支完成 Matter 修复并提交后，才可按既定顺序集成 PSRH-042、再集成 PSRH-043，并重新执行目标 build、size、启动资源采集和硬件验证。
+从 `5044f9f` 基线以独立 integration worktree 合并 `433c5ec` 端点。Git
+没有产生文本冲突；`433c5ec` 的治理补丁与基线中的 `c341e51` 为同一
+patch-id，单独 cherry-pick 因为空，随后按端点合并完整 PSRH-043 历史。
+合并结果只改动 PSRH-043 owned/evidence 路径，PSRH-042 Matter 与状态机
+只读路径保持不变。
+
+集成验证结果：
+
+- Host：`make clean && make -j2 all`，exit 0，130/130 PASS；
+- ESP32-C6：`ninja -C /tmp/psrh-043-phase5-integration-build -j2 all`，
+  exit 0，1498/1498；
+- Size：`idf.py -B /tmp/psrh-043-phase5-integration-build size`，exit 0；
+- Application BIN：`0x1d16e0`（1,906,400 B），相对 `5044f9f` 的
+  `0x1d0d80` 增加 2,400 B；
+- Flash Code：1,753,510 B，增量 2,398 B；DIRAM：243,701 B，增量
+  1,920 B；固定诊断 `.bss` 为 1,920 B；
+- `health_diag.c.obj` 贡献 872 B Flash Code 与 1,920 B `.bss`；
+  `s_task_records=768 B`、`s_task_status=1,152 B`；
+- 无板卡、串口、调试器或硬件租约，因此运行时堆/任务栈、Wi-Fi/传感器
+  恢复、Matter/BLE、断电和 watchdog 证据仍为 DEFERRED。
+
+PSRH-043 不在本轮宣称阶段 5 fully PASS。下一门禁是独立 Reviewer 复审、
+Human Lead 接受剩余运行时/HIL 边界，并由授权 Hardware Lab 收集脱敏的
+运行时资源与协议证据。

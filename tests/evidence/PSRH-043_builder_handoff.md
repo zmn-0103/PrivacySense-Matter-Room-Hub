@@ -1,15 +1,23 @@
-# PSRH-043 Builder Handoff
+# PSRH-043 Integrated Builder Handoff
 
-## Scope and baseline
+## Scope and integration
 
 - Task contract: `agent/tasks/PSRH-043.yml`
-- Baseline commit: `02e67aa5216529ca83bff32bbf46ac1a8972e48d`
-- Implementation commit: `045f37f87fce0b248a270767f6335b4b08f8724f`
-- Review-fix/contract commit: `9d83e4b`
-- Final commits: `045f37f87fce0b248a270767f6335b4b08f8724f`, `2fe9d38`, `d0b5851`, `9d83e4b`, `ef9d728`, `6e6f415`
-- Branch: `agent/psrh-043-phase5-reliability`
-- Worktree: `PrivacySense-Matter-Room-Hub-worktrees/psrh-043-phase5-reliability`
-- Date: `2026-08-08`
+- Integration baseline: `5044f9f854efdd4a9da899a357682c71605ec707`
+- PSRH-043 source tip: `433c5ec912716432b566879e20f37ec1af8ef078`
+- Integration merge commit: `c2a0ff09d70775a9d582bb3e8a71e455cfb49529`
+- Branch: `agent/psrh-043-phase5-integration`
+- Worktree: `PrivacySense-Matter-Room-Hub-worktrees/psrh-043-phase5-integration`
+- Date: `2026-08-09`
+
+The complete PSRH-043 history was merged into the independent integration
+worktree. There were no textual merge conflicts. The standalone `433c5ec`
+cherry-pick was empty because its governance patch is equivalent to the
+already present `c341e51`; this was handled by skipping the empty patch before
+the endpoint merge. The merge result changed only PSRH-043 owned/evidence
+paths. `firmware/main/matter_app.*`, `firmware/main/state_machine.*`, the
+approved interfaces, data-model/architecture documents, and hardware paths
+remain unchanged from the integration baseline.
 
 Changed implementation/evidence paths:
 
@@ -24,57 +32,49 @@ Changed implementation/evidence paths:
 - `tests/evidence/PSRH-043_*.md`
 - `agent/tasks/PSRH-043.yml`
 
-Ownership check: implementation changes remain within the contract scope and
-the read-only PSRH-042 Matter files were not modified. The pre-created task
-contract is now committed in `9d83e4b`.
-
 ## Implementation summary
 
-The new bounded diagnostic path reports current free heap, minimum free heap,
-reset reason/class, aggregate minimum task stack high-water mark, and each
-captured task's stack high-water mark. It uses fixed 32-entry static storage,
-copies task names while the scheduler is suspended, and reports the true task
-count plus capture capacity/truncation. If the task array is too small,
-`uxTaskGetSystemState()` returns zero; the startup log now exposes that case.
-The existing network task's 30-second diagnostic cadence is reused; no task,
-queue, allocation, stack-size, watchdog, reset, safe-mode, OTA, partition,
-GPIO, Matter data-model, or local-offline behavior was changed.
+The bounded diagnostic path reports current free heap, minimum free heap,
+reset class, aggregate minimum task stack high-water mark, and each captured
+task's high-water mark. It uses fixed 32-entry static storage, copies task
+names while the scheduler is suspended, and reports the true task count plus
+capture capacity/truncation. The existing network task's 30-second diagnostic
+cadence is reused; no task, queue, allocation, stack-size, watchdog, reset,
+safe-mode, OTA, partition, GPIO, Matter data-model, or local-offline behavior
+was changed.
 
 The pure reset and heap classifiers are Host-testable. Project-owned CMake
-warning suppressions were removed; diagnostics are left visible. Because the
-application did not link, a final target warning-free claim is not made.
+warning suppressions were removed and diagnostics remain visible.
 
 ## Machine verification
 
-| Check | Exact command | Tool version | Result | Evidence |
+| Check | Exact command | Tool/version | Result | Evidence |
 |---|---|---|---|---|
-| Diff hygiene | `git diff --check` | Git in workspace | PASS, exit 0 | This commit |
-| Host tests | `make clean && make -j2 all` from `tests/host` | GCC 15.2.0 | PASS, exit 0; 130/130 tests | `PSRH-043_host_test_result.md` |
-| ESP32-C6 configure | `idf.py ... set-target esp32c6` + `idf.py ... reconfigure` | ESP-IDF 5.4.1 | PASS, exit 0; Ninja graph generated | `PSRH-043_build_result.md` |
-| ESP32-C6 build | `ninja -C /tmp/psrh-043-phase5-reliability-build -j2 all` | Ninja 1.13.2 | VERIFY_FAILED, exit 1 in read-only PSRH-042 `matter_app.cpp` | `PSRH-043_build_result.md` |
-| ESP32-C6 size | `idf.py -B /tmp/psrh-043-phase5-reliability-build size` | ESP-IDF 5.4.1 | VERIFY_FAILED, exit 2; bootloader only, no app map | `PSRH-043_build_result.md` |
-| Hardware/HIL | No hardware command run | No board lease/toolchain | DEFERRED | `PSRH-043_hardware_deferral.md` |
+| Merge hygiene | `git diff --check` | Git | PASS, exit 0 | Integration worktree |
+| Host tests | `make clean && make -j2 all` from `tests/host` | GCC 15.2.0 | PASS, exit 0; 130/130 | `PSRH-043_host_test_result.md` |
+| ESP32-C6 configure | `idf.py ... set-target esp32c6` + `idf.py ... reconfigure` | ESP-IDF 5.4.1 | PASS, exit 0; 5902 GN targets / 467 files | `PSRH-043_build_result.md` |
+| ESP32-C6 build | `ninja -C /tmp/psrh-043-phase5-integration-build -j2 all` | Ninja 1.13.2 / GCC 14.2.0 | PASS, exit 0; 1498/1498 | `PSRH-043_build_result.md` |
+| ESP32-C6 size | `idf.py -B /tmp/psrh-043-phase5-integration-build size` | ESP-IDF 5.4.1 | PASS, exit 0; app map/ELF measured | `PSRH-043_resource_measurement.md` |
+| Hardware/HIL | No hardware command run | No board lease | DEFERRED | `PSRH-043_hardware_deferral.md` |
 
 ## Resource and resilience evidence
 
-- Flash/RAM delta: application compilation failed in the read-only PSRH-042
-  Matter file; bootloader-only size is recorded in
-  `PSRH-043_resource_measurement.md`.
-- Task stack high-water marks: bounded collection/logging is implemented, but
-  target runtime capture was not executed; the true task count is logged so a
-  task set over 32 is visible.
-- Wi-Fi disconnect/recovery and sensor failure/recovery: unchanged and not
-  re-tested on this isolated diagnostic commit.
-- Matter/BLE behavior: deferred until the final PSRH-042-integrated firmware.
+- Integrated application BIN: `0x1d16e0`; Flash Code: 1,753,510 B;
+  DIRAM: 243,701 B; reported total image: 1,906,295 B.
+- Delta against the compatible `5044f9f` build: BIN `+2,400` B, Flash Code
+  `+2,398` B, DIRAM/`.bss` `+1,920` B; `.data` and LP SRAM unchanged.
+- `health_diag.c.obj`: 872 B Flash Code and 1,920 B `.bss`.
+- Fixed diagnostic storage: `s_task_records` 768 B plus `s_task_status`
+  1,152 B, total 1,920 B.
+- Main application task stack constants were not increased.
+- Runtime heap and stack high-water logs, Wi-Fi/sensor recovery, Matter/BLE,
+  power-cycle, and watchdog evidence remain deferred pending Hardware Lab
+  authorization.
 
-## Risks and decisions needed
+## Handoff disposition
 
-- The current target result is `VERIFY_FAILED`, not an environment block; the
-  PSRH-042 owner must fix the existing Matter API mismatch in its own branch.
-- A successful target build with the approved ESP-IDF/ESP-Matter environment
-  is still required for application compile, warning, size, and runtime
-  resource evidence.
-- Hardware tests requiring integrated PSRH-042 firmware remain deferred.
-- Do not merge this branch to `main` or declare Phase 5 PASS. After PSRH-042
-  integration, rerun the exact `ninja -C <isolated-build> -j2 all` build,
-  `idf.py ... size`, startup resource capture, and hardware acceptance.
+The integrated target build and static resource measurement are PASS for the
+integration check. The task remains in `INTEGRATION`: independent Reviewer
+assessment, Human Lead acceptance, and the separately authorized runtime/HIL
+evidence are still required. This handoff does not declare Phase 5 fully PASS,
+does not merge to `main`, and does not push or create a PR.

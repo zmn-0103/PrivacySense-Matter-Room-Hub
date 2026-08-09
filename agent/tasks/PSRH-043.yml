@@ -1,6 +1,6 @@
 task_id: "PSRH-043"
 title: "Phase 5 reliability diagnostics and resource closure"
-status: "VERIFY_FAILED"
+status: "INTEGRATION"
 goal: "并行完成阶段 5 的项目告警清理、资源诊断基线和可靠性证据准备，不触碰 PSRH-042 Matter 适配路径或改变冻结的安全策略"
 owner: "Builder AI (to be assigned)"
 reviewer: "Codex"
@@ -46,6 +46,12 @@ constraints:
   heap_allocation_after_init: "No new unbounded allocation"
   watchdog_policy: "Observation and test preparation only; do not change timeout, registration, feed, reset, or safe-mode semantics"
   local_behavior_when_offline: "Must remain unchanged"
+
+integration_verification:
+  baseline_commit: "5044f9f854efdd4a9da899a357682c71605ec707"
+  source_tip: "433c5ec912716432b566879e20f37ec1af8ef078"
+  merge_commit: "c2a0ff09d70775a9d582bb3e8a71e455cfb49529"
+  result: "Integrated ESP32-C6 build and size PASS; runtime and hardware evidence remain DEFERRED; independent review and Human Lead acceptance remain pending."
 
 acceptance:
   - "Remove or explicitly classify project-owned build warnings in the owned paths without suppressing compiler diagnostics"
