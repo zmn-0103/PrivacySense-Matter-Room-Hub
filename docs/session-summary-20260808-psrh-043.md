@@ -1,161 +1,152 @@
 # PSRH-043 会话总结
 
-## 会话状态
+## 当前状态
 
-- Builder 日期：2026-08-08；集成复测日期：2026-08-09
-- Builder 分支：`agent/psrh-043-phase5-reliability`
-- Integration 分支：`agent/psrh-043-phase5-integration`
-- Integration Worktree：`PrivacySense-Matter-Room-Hub-worktrees/psrh-043-phase5-integration`
-- Builder 基线：`02e67aa`
-- 集成基线：`5044f9f854efdd4a9da899a357682c71605ec707`
-- 集成提交：`c2a0ff09d70775a9d582bb3e8a71e455cfb49529`
-- 当前状态：集成构建与静态资源测量通过；运行时/HIL 证据延期，等待独立审查与 Human Lead 接受
-- 集成状态：已集成到独立 integration 分支，未合并到 `main`
+- Builder Lead：Human Lead
+- Builder：Codex (Builder AI)
+- 独立 Reviewer：待分配，必须与 Builder 独立
+- Integration 分支：agent/psrh-043-phase5-integration
+- Integration Worktree：PrivacySense-Matter-Room-Hub-worktrees/psrh-043-phase5-integration
+- 集成基线：5044f9f854efdd4a9da899a357682c71605ec707
+- PSRH-043 source tip：433c5ec912716432b566879e20f37ec1af8ef078
+- Firmware merge：c2a0ff09d70775a9d582bb3e8a71e455cfb49529
+- Fresh integrated build HEAD：0d403f13ec0a0e4b2c32e16f35893f987606ae1d
+- 当前状态：INTEGRATION
+- 静态集成、Host、目标构建和资源测量已通过；运行时/HIL 是硬门禁
+- 未合并到 main，未 push，未创建 PR
 
-## 工作范围与约束
+本文件由任务契约的 owned_paths 和 delivery_metadata 明确声明。任务契约、
+证据 Markdown、受控外部产物目录及 evidence-files.sha256 构成同一收口
+链路。
 
-本会话只处理 PSRH-043 阶段 5 的告警清理、资源/复位诊断、Host 测试和证据收尾。
+## 范围和约束
 
-明确保持不变的范围：
+本会话只处理 PSRH-043 阶段 5 的告警清理、资源/复位诊断、Host 测试、
+集成构建、资源增量绑定和证据收尾。
 
-- 不修改 `firmware/main/matter_app.cpp` 或 `firmware/main/state_machine.c`；
+保持不变的范围：
+
+- 不修改 firmware/main/matter_app.cpp 或 firmware/main/state_machine.c；
 - 不引入 PSRH-042 未提交代码；
 - 不修改 watchdog、OTA、分区、复位、安全策略或离线行为；
-- 不烧录、不执行硬件测试、不扩展阶段 6 内容；
-- 可只读查看 PSRH-042 分支，但不修改其 Worktree。
+- 不烧录、不宣称未执行的硬件测试为 PASS；
+- 仅只读查看 PSRH-042 分支，不修改其 Worktree。
 
-构建要求使用 `-j2`，目标构建使用隔离目录和实际工具链路径：
+两次 fresh 构建均使用相同工具链和命令：
 
-```sh
+~~~sh
 source /home/administrator/esp/esp-idf/export.sh
 source /home/administrator/esp/esp-matter/export.sh
 export ESP_MATTER_PATH=/home/administrator/esp/esp-matter
 export NINJAFLAGS=-j2
-```
+idf.py -B <fresh-build-dir> set-target esp32c6
+idf.py -B <fresh-build-dir> reconfigure
+ninja -C <fresh-build-dir> -j2 all
+idf.py -B <fresh-build-dir> size
+~~~
 
-## 主要实现
+## 实现
 
-### 有界健康诊断
-
-在 `firmware/main/health_diag.c/.h` 增加了无动态分配的诊断路径：
+firmware/main/health_diag.c/.h 提供无动态分配的有界诊断路径：
 
 - 当前空闲堆和历史最低空闲堆；
-- 复位原因及 normal/software/panic/watchdog/brownout/unknown 分类；
+- normal/software/panic/watchdog/brownout/unknown 复位分类；
 - FreeRTOS 任务栈高水位及聚合最小值；
 - 固定容量 32 个任务记录；
-- 任务数、捕获数、容量和 `truncated` 状态写入启动/周期日志；
-- 保留现有 `network` 任务的 30 秒诊断节奏。
+- tasks、captured、capacity 和 truncated 写入日志；
+- 任务名在调度器暂停期间复制到模块自有固定缓冲区；
+- 保留现有 network 任务周期诊断节奏；
+- 不改变任务栈、队列、分配、watchdog、reset、safe-mode 或 offline 行为。
 
-审查问题已修复：
+PSRH-043 同时移除了 baseline 中 network.c 的无调用 command_is_link_event
+项目 warning；没有增加 compiler warning suppression。
 
-- 在调度器暂停期间复制 `TaskStatus_t.pcTaskName` 到模块自有固定缓冲区；
-- 调度恢复后只使用复制后的任务名，不再保存任务控制块中的名称指针；
-- `uxTaskGetSystemState()` 返回 0（任务数超过固定数组容量）时，保留真实任务数并显式记录截断；
-- FreeRTOS 返回的栈高水位按 `StackType_t` words 转换为 bytes 后记录。
+## Fresh 基线和集成构建
 
-### 告警清理
+使用相同 fresh 配置重新构建 5044f9f，确认权威基线 App BIN 为
+0x1d1120（1,904,928 B）。此前记录的 0x1d0d80 没有被继续使用。
 
-- 删除 `network.c` 中无调用方的项目自有 `command_is_link_event()`，消除项目自有 unused warning；
-- 保留 `firmware/CMakeLists.txt` 中移除 `-Wno-overloaded-virtual`、`-Wno-format-nonliteral`、`-Wno-format-security` 的有效改动；
-- 未增加新的告警抑制；上游 ESP-Matter/ConnectedHomeIP 告警仍保持可见并写入证据。
+集成构建使用 branch HEAD 0d403f1，Firmware 实现来自 c2a0ff0；HEAD 后续
+变更仅为证据元数据。结果：
 
-### 收尾文档与契约
+- baseline：1497/1497，exit 0；
+- integrated：1498/1498，exit 0；
+- integrated size：App BIN 0x1d16e0，Flash Code 1,753,510 B，
+  DIRAM 243,701 B，total image 1,906,295 B；
+- integrated App BIN SHA-256：
+  3496c18164cb3410a3e19d83a6a1357151b4cea8ca20840f4492b58a8f81294c；
+- integrated App ELF SHA-256：
+  c56bd237359ec34685d2c795a72ea4a1be30c9477694648f69e3dddf198572cc；
+- integrated App MAP SHA-256：
+  1bf52bcdd61265757f8b4f839c32a2f877ed089ff466260acb2e69b64f5fab7f。
 
-- `agent/tasks/PSRH-043.yml` 在 Builder 分支曾记录 `VERIFY_FAILED`；集成复测后状态为 `INTEGRATION`；
-- `firmware/README.md` 已恢复为基线内容，未保留当前电脑路径或 PSRH-043 专用构建目录；
-- `firmware/CMakeLists.txt` 已改为路径无关的占位构建说明，无本机绝对路径或任务专用目录；
-- 阶段 5 build、size、warning、resource、Host 和硬件延期证据已更新；
-- handoff 最终提交列表包含 `ef9d728` 和本次核心收尾提交 `6e6f415`，并记录 handoff 更新提交 `54a9dc9`。
+受控外部产物目录：
 
-## Builder 分支历史目标构建结果（集成前）
+~~~text
+/home/administrator/Project/PrivacySense-Matter-Room-Hub-artifacts/psrh-043-phase5-integration/20260809/closeout
+~~~
 
-目标配置和构建在 `firmware/` 下使用 `/home/administrator/esp` 工具链执行。
+完整产物、脱敏环境/configure/build/size/Host/warning 日志和 SHA-256 清单
+均保存在该目录。顶层 evidence-files.sha256 的 SHA-256 为：
 
-```sh
-idf.py -B /tmp/psrh-043-phase5-reliability-build set-target esp32c6
-idf.py -B /tmp/psrh-043-phase5-reliability-build reconfigure
-ninja -C /tmp/psrh-043-phase5-reliability-build -j2 all
-idf.py -B /tmp/psrh-043-phase5-reliability-build size
-```
+~~~text
+77b3bdb14380e6c508c803179a8329bb1ff40c8d533af4a0ce2060d44770e6be
+~~~
 
-结果：
+## 资源增量
 
-- `set-target esp32c6`：exit 0；
-- `reconfigure`：exit 0；GN 生成 5902 targets from 467 files；
-- `ninja ... -j2 all`：exit 1，`[1466/1498]` 在当时尚未集成的只读 PSRH-042 `firmware/main/matter_app.cpp` 失败；
-- `idf.py ... size`：exit 2，因应用重复构建失败，未生成应用 ELF/map；
-- 失败分类为 Builder 分支历史 `VERIFY_FAILED`，不是环境 `BLOCKED`；
-- bootloader 已生成：`0x5670` bytes，剩余 `0x2990` bytes（32%）；
-- 应用 Flash/RAM size 在当时尚未获得；该历史缺口已由集成复测补齐；
-- 失败涉及 `StaticSupportedModesManager`、Matter callback designated initializer、`ModeOptionStruct` 等 API/type 错误，未在 PSRH-043 分支修复。
+| Measurement | Baseline 5044f9f | Integrated | Delta |
+|---|---:|---:|---:|
+| Application BIN | 1,904,928 B (0x1d1120) | 1,906,400 B (0x1d16e0) | +1,472 B |
+| Flash Code | 1,752,036 B | 1,753,510 B | +1,474 B |
+| DIRAM/.bss | 241,781 / 88,968 B | 243,701 / 90,888 B | +1,920 B |
+| .data | 18,077 B | 18,077 B | +0 B |
+| LP SRAM | 24 B | 24 B | +0 B |
+| Total image | 1,904,821 B | 1,906,295 B | +1,474 B |
 
-目标编译期间，PSRH-043 自有源文件未观察到项目自有编译告警。仍观察到的告警属于上游 ConnectedHomeIP/ESP-Matter 或现有 CMake/Kconfig 配置问题，包括 camera optional settings 的 `maybe-uninitialized`、Color Control 的 `direction` 可能未初始化，以及依赖兼容性/配置提示。
+health_diag.c.obj 贡献 872 B Flash Code 和 1,920 B DIRAM .bss；固定符号
+s_task_records 为 768 B，s_task_status 为 1,152 B。主应用任务栈常量未增加。
 
-## Host 与差异验证
+## Host 和 warning
 
-在 `tests/host` 执行：
-
-```sh
-make clean && make -j2 all
-```
-
-结果：exit 0，`-Wall -Wextra -Werror` 下 130/130 通过：
+Host 命令 make clean && make -j2 all 在 GCC 15.2.0、-Wall -Wextra -Werror
+下 exit 0，130/130 通过：
 
 | Suite | 通过数 |
 |---|---:|
-| `occ_sm` | 17 |
-| `ui_rgb` | 20 |
-| `button_mode` | 10 |
-| `env_alert_sm` | 21 |
-| `night_window_sm` | 25 |
-| `network_reconnect_sm` | 34 |
-| `health_diag` | 3 |
+| occ_sm | 17 |
+| ui_rgb | 20 |
+| button_mode | 10 |
+| env_alert_sm | 21 |
+| night_window_sm | 25 |
+| network_reconnect_sm | 34 |
+| health_diag | 3 |
 | **总计** | **130** |
 
-`git diff --check` 已通过。最终只读核验确认：
+warning 证据来自保留日志而非只看 exit code：
 
-- 工作树干净；
-- `firmware/README.md` 与基线一致；
-- `firmware/CMakeLists.txt` 无 `/home/`、`/root/`、`/tmp/` 本机或任务路径；
-- PSRH-042 的 `matter_app.cpp`、`state_machine.c` 与基线无差异；
-- 未执行烧录或硬件测试。
+- baseline 有 project-owned network.c unused warning；
+- integrated 已无该 project-owned compiler warning；
+- firmware CMake 的 VERSION 3.5 boilerplate compatibility warning 已明确分类；
+- ESP-Matter/ConnectedHomeIP maybe-uninitialized、重复
+  SEC_CERT_DAC_PROVIDER 以及 ESP-IDF/managed-component compatibility warning
+  保持可见、未抑制。
 
-## 提交链
+## Runtime/HIL 硬门禁
 
-| Commit | 内容 |
-|---|---|
-| `045f37f` | 增加有界阶段 5 健康诊断 |
-| `2fe9d38` | 记录初始验证缺口 |
-| `d0b5851` | 初始阶段 5 handoff |
-| `9d83e4b` | 修复任务名生命周期审查问题并提交任务契约 |
-| `ef9d728` | 更新真实构建、size、warning 和资源证据 |
-| `6e6f415` | 恢复 README、清理 CMake 路径并将契约置为 `VERIFY_FAILED` |
-| `54a9dc9` | 将收尾提交 SHA 回填 handoff |
-| `c2a0ff0` | 将 PSRH-043 完整历史合并到 PSRH-042 集成基线 |
+本 integration worktree 没有板卡、串口、调试器或硬件租约，因此以下字段
+均为 NOT_CAPTURED，不得解释为 PASS：
 
-## 2026-08-09 集成复测
+- boot、tasks_ready、network_periodic；
+- tasks <= 32、captured == tasks、truncated=no；
+- free_heap、minimum_free_heap、各任务 HWM；
+- 周期诊断期间无 TWDT、panic、protocol timeout；
+- Wi-Fi、传感器、Matter/BLE smoke/recovery；
+- power-cycle 和 watchdog observation。
 
-从 `5044f9f` 基线以独立 integration worktree 合并 `433c5ec` 端点。Git
-没有产生文本冲突；`433c5ec` 的治理补丁与基线中的 `c341e51` 为同一
-patch-id，单独 cherry-pick 因为空，随后按端点合并完整 PSRH-043 历史。
-合并结果只改动 PSRH-043 owned/evidence 路径，PSRH-042 Matter 与状态机
-只读路径保持不变。
+Hardware Lab 必须使用上述精确 integrated App BIN hash，并把脱敏串口/HIL
+日志与 evidence-files.sha256 绑定。若真实采集 truncated=yes，必须先修正
+诊断容量、重新构建同一流程并重测，不能继续验收。
 
-集成验证结果：
-
-- Host：`make clean && make -j2 all`，exit 0，130/130 PASS；
-- ESP32-C6：`ninja -C /tmp/psrh-043-phase5-integration-build -j2 all`，
-  exit 0，1498/1498；
-- Size：`idf.py -B /tmp/psrh-043-phase5-integration-build size`，exit 0；
-- Application BIN：`0x1d16e0`（1,906,400 B），相对 `5044f9f` 的
-  `0x1d0d80` 增加 2,400 B；
-- Flash Code：1,753,510 B，增量 2,398 B；DIRAM：243,701 B，增量
-  1,920 B；固定诊断 `.bss` 为 1,920 B；
-- `health_diag.c.obj` 贡献 872 B Flash Code 与 1,920 B `.bss`；
-  `s_task_records=768 B`、`s_task_status=1,152 B`；
-- 无板卡、串口、调试器或硬件租约，因此运行时堆/任务栈、Wi-Fi/传感器
-  恢复、Matter/BLE、断电和 watchdog 证据仍为 DEFERRED。
-
-PSRH-043 不在本轮宣称阶段 5 fully PASS。下一门禁是独立 Reviewer 复审、
-Human Lead 接受剩余运行时/HIL 边界，并由授权 Hardware Lab 收集脱敏的
-运行时资源与协议证据。
+因此当前只能确认静态集成和目标构建通过；阶段 5 尚未 fully PASS。独立
+Reviewer、Human Lead 和授权 Hardware Lab 证据仍是后续门禁。

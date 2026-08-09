@@ -2,11 +2,13 @@ task_id: "PSRH-043"
 title: "Phase 5 reliability diagnostics and resource closure"
 status: "INTEGRATION"
 goal: "并行完成阶段 5 的项目告警清理、资源诊断基线和可靠性证据准备，不触碰 PSRH-042 Matter 适配路径或改变冻结的安全策略"
-owner: "Builder AI (to be assigned)"
-reviewer: "Codex"
+owner: "Builder Lead: Human Lead"
+builder: "Codex (Builder AI)"
+reviewer: "Independent Reviewer (pending assignment)"
 baseline_commit: "02e67aa5216529ca83bff32bbf46ac1a8972e48d"
 
 owned_paths:
+  - "agent/tasks/PSRH-043.yml"
   - "firmware/CMakeLists.txt"
   - "firmware/main/CMakeLists.txt"
   - "firmware/main/Kconfig.projbuild"
@@ -17,6 +19,7 @@ owned_paths:
   - "tests/host/Makefile"
   - "tests/host/test_health_diag.c"
   - "tests/evidence/PSRH-043_*.md"
+  - "docs/session-summary-20260808-psrh-043.md"
   - "tools/phase5_*"
 
 read_only_paths:
@@ -51,7 +54,40 @@ integration_verification:
   baseline_commit: "5044f9f854efdd4a9da899a357682c71605ec707"
   source_tip: "433c5ec912716432b566879e20f37ec1af8ef078"
   merge_commit: "c2a0ff09d70775a9d582bb3e8a71e455cfb49529"
-  result: "Integrated ESP32-C6 build and size PASS; runtime and hardware evidence remain DEFERRED; independent review and Human Lead acceptance remain pending."
+  integration_branch: "agent/psrh-043-phase5-integration"
+  integration_worktree: "PrivacySense-Matter-Room-Hub-worktrees/psrh-043-phase5-integration"
+  integration_head_at_build: "0d403f13ec0a0e4b2c32e16f35893f987606ae1d"
+  artifact_root: "/home/administrator/Project/PrivacySense-Matter-Room-Hub-artifacts/psrh-043-phase5-integration/20260809/closeout"
+  artifact_manifest: "evidence-files.sha256"
+  artifact_manifest_sha256: "77b3bdb14380e6c508c803179a8329bb1ff40c8d533af4a0ce2060d44770e6be"
+  result: "Fresh compatible baseline and integrated ESP32-C6 build/size PASS with corrected delta; runtime/HIL remains a hard gate; independent Reviewer assignment/review and Human Lead acceptance remain pending."
+
+review_scope:
+  included:
+    - "PSRH-043 owned implementation paths"
+    - "Host tests and fresh integrated ESP32-C6 build"
+    - "Warning classification and static resource delta"
+    - "BIN/ELF/MAP identity and external evidence manifest"
+    - "Runtime/HIL acceptance fields and explicit deferral"
+  excluded:
+    - "firmware/main/matter_app.cpp"
+    - "firmware/main/matter_app.h"
+    - "firmware/main/state_machine.c"
+    - "firmware/main/state_machine.h"
+    - "docs/interfaces/**"
+    - "docs/matter-data-model.md"
+    - "docs/task-architecture.md"
+    - "docs/ota-safety.md"
+    - "hardware/**"
+
+delivery_metadata:
+  task_contract: "agent/tasks/PSRH-043.yml"
+  session_summary: "docs/session-summary-20260808-psrh-043.md"
+  evidence_glob: "tests/evidence/PSRH-043_*.md"
+  integration_head_at_build: "0d403f13ec0a0e4b2c32e16f35893f987606ae1d"
+  firmware_merge_commit: "c2a0ff09d70775a9d582bb3e8a71e455cfb49529"
+  external_artifact_root: "/home/administrator/Project/PrivacySense-Matter-Room-Hub-artifacts/psrh-043-phase5-integration/20260809/closeout"
+  external_manifest: "evidence-files.sha256"
 
 acceptance:
   - "Remove or explicitly classify project-owned build warnings in the owned paths without suppressing compiler diagnostics"
