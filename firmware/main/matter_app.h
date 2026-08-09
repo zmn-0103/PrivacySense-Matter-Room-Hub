@@ -11,15 +11,16 @@
 // No EP3 in v1. Env alert is LOCAL ONLY (matter-data-model.md §5).
 //
 // Event flow (task-architecture.md §3, §4.7, §5.1):
-//   ESP-Matter CHIP callbacks (ChangeToMode, attribute read)
-//     → matter_adapter_task builds app_event_t(EVENT_MATTER_*)
-//     → sends to g_app_event_queue (consumed by state_machine_task)
+//   ESP-Matter ModeSelect ChangeToMode
+//     → SupportedModesManager submits a private bounded request
+//     → state_machine_task commits/rejects the local state within 100 ms
+//     → the SDK writes CurrentMode only after Success is returned
 //   state_machine_task (on occupancy / user_mode transition)
 //     → sends matter_report_t to g_matter_report_queue
 //     → matter_adapter_task consumes it and updates Matter attributes
 //       under the CHIP stack lock
-//   state_machine_task (after ChangeToMode evaluation, ≤ 100 ms)
-//     → calls matter_app_respond_change_to_mode() with SUCCESS / FAILURE
+//   Local projections use attribute::report(), so they cannot re-enter the
+//   controller-command callback.
 //
 // SECURITY: setup passcode / discriminator / SPAKE2+ verifier are NOT
 // hardcoded. They come from a Commissionable Data Provider at runtime
@@ -51,8 +52,8 @@ extern "C" {
 // Current contract (Phase 3 Step 6):
 //   - Creates EP0 (Root Node), EP1 (OccupancySensor, 0x0107), EP2
 //     (ModeSelect, 0x0027) with 3 supported modes (Normal/Quiet/Night).
-//   - app_attribute_update_cb routes ChangeToMode commands to
-//     state_machine_task via g_app_event_queue.
+//   - the SupportedModesManager routes ChangeToMode to state_machine_task and
+//     returns Failure on queue, policy, snapshot, update, or timeout errors.
 //   - matter_adapter_task applies MATTER_REPORT_OCCUPANCY/CURRENT_MODE/
 //     FORCE_SYNC to EP1/EP2 attributes under the CHIP stack lock.
 //   - Returns ESP_OK on success, ESP_FAIL on failure.
@@ -68,24 +69,33 @@ esp_err_t matter_app_init(void);
 // timeout for TWDT feed + health check.
 void matter_adapter_task(void *pvParameters);
 
-// Called by state_machine_task after evaluating a ChangeToMode command
-// (matter-data-model.md §4.4-4.6). MUST be invoked within 100 ms of
-// receiving the command (task-architecture.md §4.7).
+// Completes the private bounded ChangeToMode request after state_machine_task
+// evaluates it. MUST be invoked within 100 ms of receiving the command
+// (task-architecture.md §4.7).
 //
-// `cmd_ctx`       Opaque pointer from the originating Matter callback
-//                 (forwarded unchanged through app_event_t.matter_cmd.cmd_ctx).
+// `cmd_ctx`       Private response handle from
+//                 app_event_t.matter_cmd.resp_handle. It is never a CHIP
+//                 command-context pointer and remains valid after timeout.
 // `success`       true  → return SUCCESS to the controller
 //                 false → return FAILURE to the controller
 //
-// Implementations must defer the actual esp_matter command response to the
-// CHIP stack task (e.g. via a queued item processed by matter_adapter_task),
-// not call into esp_matter from the state_machine_task context.
-//
-// Current contract (Phase 3 Step 6): EP2 ModeSelect is now created, so
-// ChangeToMode is handled by the CHIP stack via app_attribute_update_cb.
-// state_machine_task processes the mode change asynchronously; this function
-// is retained for ABI compatibility and always returns ESP_OK.
+// This function only signals the waiting validator; it does not call into
+// esp_matter from the state_machine_task context.
 esp_err_t matter_app_respond_change_to_mode(void *cmd_ctx, bool success);
+
+// Returns true when a queued ChangeToMode request is cancelled, completed, or
+// does not carry the private response handle. The state machine must check
+// this before any local mutation. The check fails closed if the request mutex
+// is unavailable.
+bool matter_app_change_to_mode_is_cancelled(void *cmd_ctx);
+
+// Claim and release the final local-state commit section. The begin call
+// retains the private request mutex; the end call must be made on every
+// successful begin and signals the controller waiter with the commit result.
+// Holding this short section makes timeout cancellation mutually exclusive
+// with room_state_update().
+esp_err_t matter_app_begin_change_to_mode_commit(void *cmd_ctx);
+esp_err_t matter_app_end_change_to_mode_commit(void *cmd_ctx, bool success);
 
 // --- Factory reset (Phase 3 Step 4) ---
 // Scheduled by state_machine_task after a confirmed long-press.

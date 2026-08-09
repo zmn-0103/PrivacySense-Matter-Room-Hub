@@ -26,6 +26,13 @@ static const char *TAG = "state_machine";
 #define STATE_MACHINE_QUEUE_TIMEOUT_MS 1000U
 #define CONFIG_REREAD_INTERVAL_S    60U
 
+// Production builds leave this at zero. HIL builds can define it through
+// PSRH_HIL_NIGHT_EXIT_AFTER_MS to exercise automatic NIGHT exit without
+// changing the persisted 22:00–07:00 wall-clock configuration.
+#ifndef PSRH_HIL_NIGHT_EXIT_AFTER_MS
+#define PSRH_HIL_NIGHT_EXIT_AFTER_MS 0U
+#endif
+
 static uint32_t s_radar_timeout_ms = 10000;
 
 static uint32_t s_radar_watch_start_ms = 0;
@@ -47,7 +54,25 @@ static env_alert_sm_t     s_env_alert_sm;
 static env_alert_config_t s_env_alert_cfg;
 static night_window_config_t s_night_cfg;
 
-static bool s_matter_sync_pending = false;
+#if PSRH_HIL_NIGHT_EXIT_AFTER_MS > 0U
+static uint32_t s_hil_night_enter_ms = 0U;
+static bool     s_hil_night_timer_armed = false;
+static bool     s_hil_night_hold_until_window_exit = false;
+#endif
+
+// Monotonic request generation shared with matter_adapter_task. The adapter
+// increments it when an attribute report fails; state_machine_task consumes a
+// generation only after enqueueing a FORCE_SYNC. Use compiler atomics rather
+// than volatile: the two tasks can preempt one another, so a plain read-
+// modify-write increment could overwrite a concurrent failure notification.
+static uint32_t s_matter_sync_request_generation = 0;
+static uint32_t s_matter_sync_consumed_generation = 0;
+
+void state_machine_mark_matter_sync_pending(void)
+{
+    (void)__atomic_fetch_add(&s_matter_sync_request_generation, 1U,
+                             __ATOMIC_RELAXED);
+}
 
 static esp_err_t push_matter_report(matter_report_type_t type,
                                     occupancy_state_t occ,
@@ -56,7 +81,7 @@ static esp_err_t push_matter_report(matter_report_type_t type,
     matter_report_t rpt = { .type = type, .occupancy = occ, .user_mode = mode };
     if (xQueueSend(g_matter_report_queue, &rpt, 0) != pdTRUE) {
         ESP_LOGW(TAG, "matter report dropped (type=%d)", (int)type);
-        s_matter_sync_pending = true;
+        state_machine_mark_matter_sync_pending();
         return ESP_ERR_NO_MEM;
     }
     return ESP_OK;
@@ -652,37 +677,135 @@ static void process_matter_lifecycle(const matter_lifecycle_t *lifecycle)
     }
 }
 
-static void process_matter_command(const matter_command_t *cmd)
+// Re-check the local NIGHT policy after the command has crossed the event
+// queue. The SupportedModesManager rejects the controller command before the
+// Matter attribute write, while this second check prevents queue latency or a
+// configuration/time-window boundary from turning an already-queued request
+// into an invalid local state transition.
+static bool matter_night_window_allows_entry(const ps_config_t *cfg)
 {
+    if (cfg == NULL) return false;
+
+    night_window_sm_state_t candidate = {
+        .user_mode      = NIGHT_WINDOW_MODE_NORMAL,
+        .pre_night_mode = NIGHT_WINDOW_MODE_NORMAL,
+        .quiet_active   = false,
+    };
+    night_window_time_t t = get_current_time();
+    night_window_config_t nwc = {
+        .night_start_min = cfg->night_start_min,
+        .night_end_min   = cfg->night_end_min,
+    };
+
+    (void)night_window_sm_eval(&candidate, &t, &nwc);
+    return candidate.user_mode == NIGHT_WINDOW_MODE_NIGHT;
+}
+
+static void respond_matter_command(const matter_command_t *cmd, bool success)
+{
+    if (cmd == NULL || cmd->resp_handle == NULL) {
+        ESP_LOGE(TAG, "MATTER ChangeToMode response handle missing");
+        return;
+    }
+
+    esp_err_t ret = matter_app_respond_change_to_mode(cmd->resp_handle, success);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "MATTER ChangeToMode response failed: %s",
+                 esp_err_to_name(ret));
+    }
+}
+
+static bool matter_command_is_cancelled(const matter_command_t *cmd)
+{
+    return cmd == NULL ||
+           matter_app_change_to_mode_is_cancelled(cmd->resp_handle);
+}
+
+static void process_matter_command(const matter_command_t *cmd,
+                                   const ps_config_t *cfg)
+{
+    if (cmd == NULL || cfg == NULL) {
+        ESP_LOGE(TAG, "MATTER ChangeToMode: command/config missing");
+        respond_matter_command(cmd, false);
+        return;
+    }
+
     if (cmd->type != MATTER_COMMAND_CHANGE_TO_MODE) {
         ESP_LOGW(TAG, "unknown matter command type %d", (int)cmd->type);
+        respond_matter_command(cmd, false);
+        return;
+    }
+
+    if (matter_command_is_cancelled(cmd)) {
+        ESP_LOGW(TAG, "MATTER ChangeToMode: queued request was cancelled");
+        respond_matter_command(cmd, false);
         return;
     }
 
     uint8_t new_mode = cmd->new_mode;
     if (new_mode > 2) {
         ESP_LOGW(TAG, "MATTER ChangeToMode: rejected invalid mode %u", (unsigned)new_mode);
+        respond_matter_command(cmd, false);
+        return;
+    }
+
+    if (new_mode == MODE_NIGHT && !matter_night_window_allows_entry(cfg)) {
+        ESP_LOGW(TAG, "MATTER ChangeToMode: NIGHT rejected outside valid night window");
+        respond_matter_command(cmd, false);
         return;
     }
 
     // Phase 3 Step 6: apply the mode change directly. A controller-initiated
     // ChangeToMode overrides the current user_mode and resets quiet_active
     // (the controller is authoritative for mode selection, unlike short-press
-    // toggles). pre_night_mode is preserved so NIGHT window auto-switch can
-    // restore it later.
+    // toggles). On entry to NIGHT, save the actual mode immediately before
+    // entry; this must also work for QUIET → NIGHT. For an explicit non-NIGHT
+    // controller mode, make that mode the next NIGHT restore baseline.
     room_state_t st;
     if (room_state_snapshot(&st) != ESP_OK) {
         ESP_LOGE(TAG, "MATTER ChangeToMode: snapshot failed");
+        respond_matter_command(cmd, false);
+        return;
+    }
+
+    if (matter_command_is_cancelled(cmd)) {
+        ESP_LOGW(TAG, "MATTER ChangeToMode: cancelled after snapshot");
+        respond_matter_command(cmd, false);
         return;
     }
 
     user_mode_t target = (user_mode_t)new_mode;
     user_mode_t old_mode = st.user_mode;
 
+    if (target == MODE_NIGHT && old_mode != MODE_NIGHT) {
+        st.pre_night_mode = old_mode;
+    } else if (target != MODE_NIGHT) {
+        st.pre_night_mode = target;
+    }
     st.user_mode    = target;
     st.quiet_active = false;   // direct set, not a toggle
 
-    if (room_state_update(&st) != ESP_OK) {
+    // Claim the final commit section immediately before the single writer
+    // mutation. If the caller timed out first, begin fails and no local state
+    // change is allowed. On success, the helper holds the request mutex until
+    // it signals the controller with the result below.
+    esp_err_t commit_begin = matter_app_begin_change_to_mode_commit(cmd->resp_handle);
+    if (commit_begin != ESP_OK) {
+        ESP_LOGW(TAG, "MATTER ChangeToMode: commit cancelled/unavailable: %s",
+                 esp_err_to_name(commit_begin));
+        respond_matter_command(cmd, false);
+        return;
+    }
+
+    esp_err_t update_ret = room_state_update(&st);
+    esp_err_t response_ret = matter_app_end_change_to_mode_commit(
+        cmd->resp_handle, update_ret == ESP_OK);
+    if (response_ret != ESP_OK) {
+        ESP_LOGE(TAG, "MATTER ChangeToMode: commit response failed: %s",
+                 esp_err_to_name(response_ret));
+    }
+
+    if (update_ret != ESP_OK) {
         ESP_LOGE(TAG, "MATTER ChangeToMode: update failed");
         return;
     }
@@ -693,9 +816,9 @@ static void process_matter_command(const matter_command_t *cmd)
              target == MODE_NORMAL ? "NORMAL" :
              target == MODE_QUIET  ? "QUIET"  : "NIGHT");
 
-    // Push report so matter_adapter_task syncs the CurrentMode attribute.
-    // The CHIP stack already accepted the write (app_attribute_update_cb
-    // returned ESP_OK), so this is a best-effort sync of the actual state.
+    // Push report so matter_adapter_task can reconcile the attribute. A full
+    // report queue does not undo the committed local state: push_matter_report
+    // arms the generation-based FORCE_SYNC retry path instead.
     (void)push_matter_report(MATTER_REPORT_CURRENT_MODE,
                              st.occupancy, st.user_mode);
 }
@@ -714,10 +837,13 @@ static void process_matter_command(const matter_command_t *cmd)
 //
 // Local state update does NOT depend on Matter queue success: even if
 // push_matter_report drops the report, room_state is already updated and
-// s_matter_sync_pending will trigger a force-sync retry on the next loop.
+// the generation-based sync request will trigger a force-sync retry on the
+// next loop.
 static void evaluate_night_window(uint32_t now_ms, const ps_config_t *cfg)
 {
+#if PSRH_HIL_NIGHT_EXIT_AFTER_MS == 0U
     (void)now_ms;
+#endif
 
     room_state_t st;
     if (room_state_snapshot(&st) != ESP_OK) {
@@ -736,7 +862,50 @@ static void evaluate_night_window(uint32_t now_ms, const ps_config_t *cfg)
         .night_end_min   = cfg->night_end_min,
     };
 
-    if (!night_window_sm_eval(&nws, &t, &nwc)) return;
+    bool changed = false;
+#if PSRH_HIL_NIGHT_EXIT_AFTER_MS > 0U
+    bool hil_timed_exit = false;
+#endif
+
+#if PSRH_HIL_NIGHT_EXIT_AFTER_MS > 0U
+    if (t.time_valid && s_hil_night_hold_until_window_exit) {
+        // After the accelerated HIL exit, suppress immediate re-entry while
+        // the real wall-clock NIGHT window is still active. Clear the hold
+        // once the real window ends so normal production semantics resume.
+        night_window_sm_state_t probe = {
+            .user_mode      = NIGHT_WINDOW_MODE_NORMAL,
+            .pre_night_mode = NIGHT_WINDOW_MODE_NORMAL,
+            .quiet_active   = false,
+        };
+        if (!night_window_sm_eval(&probe, &t, &nwc)) {
+            s_hil_night_hold_until_window_exit = false;
+        } else {
+            return;
+        }
+    }
+
+    if (t.time_valid && st.user_mode == MODE_NIGHT &&
+        !s_hil_night_timer_armed && !s_hil_night_hold_until_window_exit) {
+        s_hil_night_enter_ms = now_ms;
+        s_hil_night_timer_armed = true;
+        ESP_LOGI(TAG, "HIL NIGHT exit timer armed: %u ms",
+                 (unsigned)PSRH_HIL_NIGHT_EXIT_AFTER_MS);
+    }
+
+    if (t.time_valid && st.user_mode == MODE_NIGHT &&
+        s_hil_night_timer_armed &&
+        (uint32_t)(now_ms - s_hil_night_enter_ms) >=
+            (uint32_t)PSRH_HIL_NIGHT_EXIT_AFTER_MS) {
+        nws.user_mode = nws.pre_night_mode;
+        changed = true;
+        hil_timed_exit = true;
+    }
+#endif
+
+    if (!changed) {
+        changed = night_window_sm_eval(&nws, &t, &nwc);
+    }
+    if (!changed) return;
 
     // State changed: write back. quiet_active is unchanged by the pure
     // function; copy through to keep room_state consistent.
@@ -749,6 +918,27 @@ static void evaluate_night_window(uint32_t now_ms, const ps_config_t *cfg)
         ESP_LOGE(TAG, "evaluate_night_window: update failed");
         return;
     }
+
+#if PSRH_HIL_NIGHT_EXIT_AFTER_MS > 0U
+    // Commit HIL control state only after the local state update succeeds.
+    // If it fails, the timer remains armed and the next periodic evaluation
+    // retries the exit instead of holding the device in NIGHT until morning.
+    if (hil_timed_exit) {
+        s_hil_night_timer_armed = false;
+        s_hil_night_hold_until_window_exit = true;
+        ESP_LOGI(TAG, "HIL NIGHT timed exit after %u ms",
+                 (unsigned)PSRH_HIL_NIGHT_EXIT_AFTER_MS);
+    } else if (prev_mode == MODE_NIGHT && st.user_mode != MODE_NIGHT) {
+        s_hil_night_timer_armed = false;
+    }
+
+    if (t.time_valid && prev_mode != MODE_NIGHT && st.user_mode == MODE_NIGHT) {
+        s_hil_night_enter_ms = now_ms;
+        s_hil_night_timer_armed = true;
+        ESP_LOGI(TAG, "HIL NIGHT exit timer armed: %u ms",
+                 (unsigned)PSRH_HIL_NIGHT_EXIT_AFTER_MS);
+    }
+#endif
 
     ESP_LOGI(TAG, "night window: mode %s -> %s",
              prev_mode == MODE_NORMAL ? "NORMAL" :
@@ -806,7 +996,7 @@ void state_machine_task(void *pvParameters)
                 process_network(ev.data.network);
                 break;
             case EVENT_MATTER_COMMAND:
-                process_matter_command(&ev.data.matter_cmd);
+                process_matter_command(&ev.data.matter_cmd, &cfg);
                 break;
             case EVENT_MATTER_LIFECYCLE:
                 process_matter_lifecycle(&ev.data.matter_lifecycle);
@@ -834,7 +1024,9 @@ void state_machine_task(void *pvParameters)
         evaluate_night_window(xTaskGetTickCount() * portTICK_PERIOD_MS, &cfg);
         radar_check_timeout();
 
-        if (s_matter_sync_pending) {
+        uint32_t sync_generation = __atomic_load_n(
+            &s_matter_sync_request_generation, __ATOMIC_RELAXED);
+        if (sync_generation != s_matter_sync_consumed_generation) {
             room_state_t rs;
             if (room_state_snapshot(&rs) == ESP_OK) {
                 matter_report_t rpt = {
@@ -843,7 +1035,7 @@ void state_machine_task(void *pvParameters)
                     .user_mode = rs.user_mode,
                 };
                 if (xQueueSend(g_matter_report_queue, &rpt, 0) == pdTRUE) {
-                    s_matter_sync_pending = false;
+                    s_matter_sync_consumed_generation = sync_generation;
                     ESP_LOGI(TAG, "matter sync retry ok");
                 }
             }

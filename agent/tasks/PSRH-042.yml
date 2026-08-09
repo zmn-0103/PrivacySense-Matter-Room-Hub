@@ -1,0 +1,163 @@
+task_id: "PSRH-042"
+title: "Matter API compatibility on ESP-Matter release/v1.5"
+status: "READY_TO_MERGE" # 独立 Reviewer PASS，Human Lead 已接受剩余证据边界
+goal: "在锁定的 ESP-Matter release/v1.5 上完成 Matter API 兼容、保持 EP0/EP1/EP2 数据模型不变，并产生构建/size/测试证据"
+builder_lead: "gpt-5.6-terra"
+owner: "gpt-5.6-luna"
+owner_reasoning_effort: "max"
+reviewer: "gpt-5.6-sol"
+baseline_commit: "02e67aa5216529ca83bff32bbf46ac1a8972e48d"
+
+review_scope:
+  included_commits:
+    - "2392a3b54564fcc270faa54d98bbdc7e3d923298"
+    - "b9dee960936e61b136ffb19598abd21ae9f456f2"
+    - "54014834049fb44e7f3564e40b334b438a3bd10c"
+    - "587243575138a3983c6658c4eb991d89ffa1de2f"
+    - "5d2e356312b998b3f22a3f6b4855b49632756e51"
+    - "6f498dffdd38eeaea257b9e6f23597bb2b45731b"
+    - "2f5d58379360d759aa4c6ffd8c5574ff247c2cf5"
+    - "560734bd254ac1953327149a787b5525c3229648"
+    - "87a3f4157630ed639e3f7d99fe70079fc3e51684"
+    - "0dda51d4aeef2a1717445dcb96c462094b8ed1ec"
+    - "7ebb6eec5f40d9f95a02e2dc1119887c4f0f3aee"
+  excluded_commits:
+    - commit: "c341e512600e673ca23fb73b377a4a8052d1b3a1"
+      reason: "Separately synchronized collaboration/governance documentation; not PSRH-042 functional delivery."
+      acceptance: "ACCEPTED SEPARATELY BY HUMAN LEAD on 2026-08-09; excluded from the PSRH-042 functional review scope but no longer a merge blocker."
+
+owned_paths:
+  - "firmware/main/CMakeLists.txt"
+  - "firmware/main/matter_app.cpp"
+  - "firmware/main/state_machine.c"
+# The two headers below carry the private response-handle declaration and the
+# retry helper used by the two owned implementation units. They are included
+# in this closeout's explicitly approved implementation/build scope; no public
+# Matter endpoint/interface is changed.
+  - "firmware/main/matter_app.h"
+  - "firmware/main/state_machine.h"
+
+delivery_scope:
+  implementation_paths:
+    - "firmware/main/CMakeLists.txt"
+    - "firmware/main/matter_app.cpp"
+    - "firmware/main/matter_app.h"
+    - "firmware/main/state_machine.c"
+    - "firmware/main/state_machine.h"
+  acceptance_metadata_paths:
+    - "agent/tasks/PSRH-042.yml"
+    - "tests/evidence/PSRH-042_builder_handoff.md"
+    - "tests/evidence/PSRH-042_matter_delta_acceptance_20260808.md"
+    - "tests/evidence/PSRH-042_controller_change_to_mode_hil_20260809.md"
+    - "docs/session-summary-20260808.md"
+  approval: "Human Lead explicitly requested this implementation, task-contract, sanitized-evidence, handoff, and acceptance-summary closeout on 2026-08-08. The approved implementation/build scope includes firmware/main/CMakeLists.txt plus the four listed source/header files; metadata paths are delivery artifacts."
+  excluded_preexisting_history:
+    commit: "c341e51"
+    paths:
+      - "AGENTS.md"
+      - "agent/task_templates/task-contract.yml"
+      - "docs/multi-agent-development.md"
+    status: "ACCEPTED SEPARATELY BY HUMAN LEAD on 2026-08-09; remains outside PSRH-042 functional delivery scope and may remain in branch history."
+read_only_paths:
+  - "docs/interfaces/**"
+  - "docs/matter-data-model.md"
+  - "docs/task-architecture.md"
+  - "docs/approved_sources/**"
+  - "hardware/**"
+
+interfaces:
+  - "docs/interfaces/README.md"
+  - "docs/matter-data-model.md"
+approved_sources:
+  - "docs/approved_sources/README.md"
+related_adrs: []
+
+constraints:
+  mcu: "ESP32-C6"
+  transport: "Matter over Wi-Fi; BLE only for commissioning/maintenance"
+  build_directory: "External and task-specific; recommended /root/build/privacy-sense/psrh-042-matter-v15"
+  matter_data_model: "Keep the approved EP0/EP1/EP2 topology, device types, clusters, attributes, mode values, and offline semantics unchanged. The Radar FeatureMap addition is the sole explicitly approved model-level delta and must remain isolated and called out in the handoff."
+  max_stack_bytes: "No increase approved; measure and report the actual value"
+  max_flash_increase_bytes: "Not yet approved; measure against the baseline build"
+  heap_allocation_after_init: "bounded; supported-mode data must remain static unless separately approved"
+  local_behavior_when_offline: "The local state machine continues operating; Matter attributes are not assumed reachable offline and are synchronized after reconnection."
+
+acceptance:
+  - "A clean ESP32-C6 build succeeds against the recorded ESP-IDF and ESP-Matter release/v1.5 toolchain, with all warnings classified."
+  - "The EP0/EP1/EP2 topology, device types, cluster IDs, attribute IDs, mode values, and approved offline semantics remain unchanged from docs/matter-data-model.md."
+  - "Endpoint 2 exposes exactly Normal=0, Quiet=1, and Night=2 through the ESP-Matter 1.5 SupportedModes API, with empty semantic-tag lists and no unbounded runtime allocation."
+  - "The SupportedModesManager uses the locked SDK callback semantics, converts queue/state/timeout failures to an Interaction Model failure before CurrentMode::Set(), and does not pass a transient Matter command context across tasks."
+  - "ChangeToMode NIGHT is rejected synchronously by the ESP-Matter SupportedModesManager unless local time is valid and inside the configured night window; the state machine re-checks the same policy after queue delivery."
+  - "The explicitly approved Radar FeatureMap is compatible with the locked SDK and is the only Matter data-model delta; the approved occupancy value mapping and local UNKNOWN/offline behavior remain intact."
+  - "Build, size, host/static test, and any deferred hardware evidence are recorded against the task commit and toolchain."
+
+new_fabric_hil_verification:
+  result_label: "新 Fabric HIL"
+  storage_path: "/home/administrator/Project/PrivacySense-Matter-Room-Hub-artifacts/psrh-042-matter-v15/20260808/new-fabric-hil/controller-storage"
+  storage_manifest_sha256: "22711e42d0da1c19496e4c78205ffdf6d963c3c91b28120f448c409461d0220b"
+  firmware_variant: "PSRH_HIL_NIGHT_EXIT_AFTER_MS=300000"
+  restricted_build: "ninja -C <external-hil-build-dir> -j2"
+  results:
+    T14: "PARTIAL — operational CASE/reads PASS; original PASE/NOC success chain not retained"
+    T05: "PASS — Occupancy reads 1 -> 1 -> 1 across radar disconnect/recovery"
+    T16: "PASS — CurrentMode 0 -> 1 -> 0 after short presses"
+    NIGHT_protection: "PASS — window-outside ChangeToMode(2) rejected with sanitized 0x0000002F"
+    T17: "PARTIAL — accelerated automatic exit captured; automatic entry not separately captured"
+    T19: "PARTIAL — offline local NORMAL -> QUIET captured; post-recovery latest-value read not verified because operational mDNS was not rediscovered"
+    controller_change_to_mode_success_path: "PASS — authoritative rerun used the 2f5d583 default production BIN/ELF with the existing persistent storage for CurrentMode 0 -> ChangeToMode(1) Success -> 1 -> ChangeToMode(0) Success -> 0, then repeated 1 -> 0 for request-slot reuse; paired serial transition/error evidence is committed in tests/evidence/PSRH-042_controller_change_to_mode_hil_20260809.md (0dda51d4). The earlier 87a3f415 HIL record used the f8e5f9a HIL image and is superseded."
+  recovery:
+    controller_restart_same_storage: "PASS — independent chip-tool processes reused the persistent storage and re-established CASE"
+    device_restart_case_ep_reads: "PARTIAL — ordinary restart restored CASE and EP2 read; post-restart EP1/EP2 pair not both retained"
+    recommissioning: "DEFERRED — no further NVS/Fabric clearing was necessary"
+  controller_success_path_hil:
+    source_commit: "2f5d58379360d759aa4c6ffd8c5574ff247c2cf5"
+    branch_head_at_test: "a03194f012b11d916a9607c1df44079638b89912"
+    firmware_variant: "default production; PSRH_HIL_NIGHT_EXIT_AFTER_MS unset"
+    bin_sha256: "18571c257c0c4e459f4c92d6c7133fb6bd64abd155eec935749f0524f4f881ca"
+    elf_sha256: "74220b7982eca8707304e23e7cd298a950afc71e47778a0461f0295924924b67"
+    flash: "ordinary idf.py flash; bootloader/app/partition/OTA verified; no erase-flash, NVS clear, or commissioning"
+    result: "PASS — two complete 0 -> 1 -> 0 controller loops with CurrentMode reads and serial-side local transition/error scan"
+    evidence_commit: "0dda51d4aeef2a1717445dcb96c462094b8ed1ec"
+
+independent_review:
+  conclusion: "PASS"
+  reviewer: "gpt-5.6-sol"
+  branch: "agent/psrh-042-matter-v15"
+  reviewed_head: "7ebb6eec5f40d9f95a02e2dc1119887c4f0f3aee"
+  implementation_commit: "2f5d58379360d759aa4c6ffd8c5574ff247c2cf5"
+  authoritative_hil_evidence_commit: "0dda51d4aeef2a1717445dcb96c462094b8ed1ec"
+  superseded_evidence_commit: "87a3f4157630ed639e3f7d99fe70079fc3e51684"
+  reviewed_at: "2026-08-09"
+  scope: "No new blocking issues; production default, HIL/CMake isolation, retry-safe exit, request lifetime, FORCE_SYNC generation, request-slot reuse, production-image HIL, image hashes, diff hygiene, firmware freeze, and clean worktree accepted."
+  gate: "Satisfied by the explicit Human Lead acceptance recorded below; no firmware change is covered by this metadata closeout."
+
+human_lead_acceptance:
+  accepted: true
+  accepted_by: "Human Lead (explicit user approval)"
+  accepted_at: "2026-08-09"
+  accepted_boundaries:
+    - "T14 remains PARTIAL at the retained-evidence boundary: operational CASE/reads are proven, but the raw PASE/NOC success chain is not retained."
+    - "T17 remains PARTIAL at the retained-evidence boundary: automatic exit and post-exit CurrentMode are captured, but automatic entry is not separately captured."
+    - "T19 remains PARTIAL at the retained-evidence boundary: offline local transition is captured, but post-recovery latest-value read was not verified."
+    - "Device restart EP1/EP2 evidence remains PARTIAL because the post-restart pair was not both retained."
+  disposition: "Accepted for READY_TO_MERGE / integration with the stated evidence boundaries; later firmware changes or integration conflicts require fresh review."
+
+required_evidence:
+  - "builder_handoff"
+  - "build_result"
+  - "size_result"
+  - "test_result"
+  - "resource_measurement_or_gap"
+  - "sanitized_hardware_evidence_or_explicit_deferral"
+
+forbidden:
+  - "Change a public interface or the approved Matter data model without human approval and an architecture record"
+  - "Commit credentials, setup payloads, private keys, MAC addresses, or raw logs"
+  - "Bypass tests, warnings, watchdog, or error handling"
+  - "Treat the current unbuilt working-tree diff as completed or accepted"
+
+approval:
+  required: true
+  approved_by: "Human Lead (explicit user approval)"
+  approved_at: "2026-08-07"
+  notes: "Approved to proceed from baseline 02e67aa in the isolated Builder branch/worktree and a task-specific external build directory. EP0/EP1/EP2 topology, device types, clusters, attributes, mode values, and offline semantics are frozen. The Radar FeatureMap addition is explicitly approved as the sole Matter data-model delta; no other model/interface change is approved. Build, size, test, and handoff evidence are mandatory. Follow-up scope explicitly requested by Human Lead on 2026-08-07: add the ChangeToMode NIGHT window semantic guard in firmware/main/matter_app.cpp and firmware/main/state_machine.c without changing the Matter data model. Follow-up scope explicitly requested by Human Lead on 2026-08-08: close the reviewer findings in the owned implementation units, include their private headers, update the task contract, and commit sanitized evidence, the builder handoff, and the acceptance/session summary. Follow-up scope explicitly requested by Human Lead on 2026-08-09: include firmware/main/CMakeLists.txt in the approved owned/delivery scope and submit commits 5d2e356 and 6f498df for review. Human Lead separately accepted c341e51 on 2026-08-09; it remains excluded from PSRH-042 functional delivery but is no longer a merge blocker."
