@@ -3,12 +3,17 @@
 # ESP-IDF + ESP-Matter project entry point.
 # Toolchain baseline: ESP-IDF v5.4.1, ESP-Matter release/v1.5 (see firmware/README.md).
 #
-# Build (inside WSL2 with esp-idf + esp-matter env loaded):
-#   source /root/esp/esp-idf/export.sh && source /root/esp/esp-matter/export.sh
-#   idf.py set-target esp32c6
-#   idf.py build
+# Build (with esp-idf + esp-matter environment loaded):
+#   source <esp-idf>/export.sh
+#   source <esp-matter>/export.sh
+#   export ESP_MATTER_PATH=<esp-matter>
+#   export NINJAFLAGS=-j2
+#   idf.py -B <build-dir> set-target esp32c6
+#   idf.py -B <build-dir> reconfigure
+#   ninja -C <build-dir> -j2 all
+#   idf.py -B <build-dir> size
 #
-# ESP_MATTER_PATH is exported by /root/esp/esp-matter/export.sh.
+# ESP_MATTER_PATH is exported by the ESP-Matter environment script.
 #
 # Boilerplate mirrors esp-matter release/v1.5 examples/light/CMakeLists.txt.
 # Project-local components live under firmware/components/ and are appended
@@ -21,7 +26,7 @@ cmake_minimum_required(VERSION 3.5)
 if(NOT DEFINED ENV{ESP_MATTER_PATH})
     message(FATAL_ERROR
         "ESP_MATTER_PATH environment variable is not set. "
-        "Run `source /root/esp/esp-matter/export.sh` before invoking idf.py.")
+        "Run the ESP-Matter export script before invoking idf.py.")
 endif()
 
 # v1 locks the board to ESP32-C6. If a previous configure run failed mid-way
@@ -93,10 +98,8 @@ set(EXTRA_COMPONENT_DIRS
 project(privacy-sense-matter-room-hub)
 
 # Match upstream light example: C++17, optimised, CHIP_HAVE_CONFIG_H.
-# Upstream emits -Wextra warnings; suppress the noisy ones rather than
-# enabling -Werror (see firmware/README.md "First build status").
-idf_build_set_property(CXX_COMPILE_OPTIONS "-std=gnu++17;-Os;-DCHIP_HAVE_CONFIG_H;-Wno-overloaded-virtual" APPEND)
+# Keep compiler diagnostics visible in this project-owned build file. The
+# initial build does not promote all upstream warnings to errors; any emitted
+# warnings are classified in the Phase 5 evidence instead of being suppressed.
+idf_build_set_property(CXX_COMPILE_OPTIONS "-std=gnu++17;-Os;-DCHIP_HAVE_CONFIG_H" APPEND)
 idf_build_set_property(C_COMPILE_OPTIONS "-Os" APPEND)
-# For RISCV chips, project_include.cmake sets -Wno-format, but does not clear
-# various flags that depend on -Wformat.
-idf_build_set_property(COMPILE_OPTIONS "-Wno-format-nonliteral;-Wno-format-security" APPEND)

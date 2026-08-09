@@ -39,6 +39,7 @@
 
 #include "network_reconnect_sm.h"
 #include "state_machine.h"
+#include "health_diag.h"
 
 static const char *TAG = "network";
 
@@ -194,13 +195,6 @@ static network_status_t status_to_public(net_sm_status_t s)
     case NET_SM_STATUS_PROVISIONED:  return NETWORK_STATUS_PROVISIONED;
     default:                         return NETWORK_STATUS_DISCONNECTED;
     }
-}
-
-static bool command_is_link_event(net_cmd_type_t type)
-{
-    return type == NET_CMD_WIFI_STA_START ||
-           type == NET_CMD_WIFI_DISCONNECTED ||
-           type == NET_CMD_IP_GOT_IP;
 }
 
 static bool sequence_before(uint32_t lhs, uint32_t rhs)
@@ -552,6 +546,7 @@ void network_task(void *pvParameters)
                          (unsigned)uxTaskGetStackHighWaterMark(NULL),
                          (int)s_sm.state);
             }
+            health_diag_log("network_periodic");
         }
 
         if (did_work) continue;

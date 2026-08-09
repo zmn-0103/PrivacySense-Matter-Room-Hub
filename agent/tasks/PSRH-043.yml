@@ -1,0 +1,77 @@
+task_id: "PSRH-043"
+title: "Phase 5 reliability diagnostics and resource closure"
+status: "VERIFY_FAILED"
+goal: "并行完成阶段 5 的项目告警清理、资源诊断基线和可靠性证据准备，不触碰 PSRH-042 Matter 适配路径或改变冻结的安全策略"
+owner: "Builder AI (to be assigned)"
+reviewer: "Codex"
+baseline_commit: "02e67aa5216529ca83bff32bbf46ac1a8972e48d"
+
+owned_paths:
+  - "firmware/CMakeLists.txt"
+  - "firmware/main/CMakeLists.txt"
+  - "firmware/main/Kconfig.projbuild"
+  - "firmware/main/main.c"
+  - "firmware/main/network.c"
+  - "firmware/main/health_diag.c"
+  - "firmware/main/health_diag.h"
+  - "tests/host/Makefile"
+  - "tests/host/test_health_diag.c"
+  - "tests/evidence/PSRH-043_*.md"
+  - "tools/phase5_*"
+
+read_only_paths:
+  - "firmware/main/matter_app.cpp"
+  - "firmware/main/state_machine.c"
+  - "docs/interfaces/**"
+  - "docs/matter-data-model.md"
+  - "docs/task-architecture.md"
+  - "docs/ota-safety.md"
+  - "hardware/**"
+
+interfaces:
+  - "docs/interfaces/README.md"
+  - "docs/task-architecture.md"
+
+approved_sources:
+  - "docs/approved_sources/README.md"
+
+related_adrs: []
+
+constraints:
+  mcu: "ESP32-C6"
+  transport: "Matter over Wi-Fi; BLE only for commissioning/maintenance"
+  integration_dependency: "Integrate only after the final PSRH-042 Builder commit; re-run the final build and resource measurements on the integrated commit"
+  max_stack_bytes: "No task stack increase approved"
+  max_flash_increase_bytes: "Diagnostics must be measured; no unbounded increase approved"
+  heap_allocation_after_init: "No new unbounded allocation"
+  watchdog_policy: "Observation and test preparation only; do not change timeout, registration, feed, reset, or safe-mode semantics"
+  local_behavior_when_offline: "Must remain unchanged"
+
+acceptance:
+  - "Remove or explicitly classify project-owned build warnings in the owned paths without suppressing compiler diagnostics"
+  - "Provide bounded health/resource diagnostics for heap, minimum free heap, task stack high-water marks, and reset reason, or document why an existing source is sufficient"
+  - "Add Host-testable pure logic for any new diagnostic classification or threshold behavior"
+  - "Run project Host tests and an isolated ESP32-C6 build with -j2; record exact commands, exit codes, toolchain commits, size, and warning summary"
+  - "Prepare sanitized Phase 5 evidence for resource measurements and explicitly defer tests that require the integrated PSRH-042 firmware or hardware"
+  - "After PSRH-042 integration, re-run the final build/size and hardware resource capture before declaring Phase 5 PASS"
+
+required_evidence:
+  - "builder_handoff"
+  - "build_result"
+  - "host_test_result"
+  - "warning_classification"
+  - "flash_ram_and_stack_measurement_or_explicit_gap"
+  - "sanitized_hardware_evidence_or_explicit_deferral"
+
+forbidden:
+  - "Modify firmware/main/matter_app.cpp or firmware/main/state_machine.c while PSRH-042 is active"
+  - "Change public interfaces, Matter data model, GPIO, partitions, OTA behavior, watchdog semantics, reset policy, or safe-mode behavior without a separately approved architecture change"
+  - "Add a production fault-injection command or deliberately trigger a watchdog reset without separate Human Lead approval"
+  - "Suppress warnings, weaken tests, or treat an unperformed check as PASS"
+  - "Commit credentials, setup payloads, private keys, MAC addresses, complete addresses, or raw logs"
+
+approval:
+  required: true
+  approved_by: "Human Lead (branch and Phase 5 start explicitly requested)"
+  approved_at: "2026-08-08"
+  notes: "Approval is limited to this low-conflict diagnostic/resource scope. T11 destructive config-corruption injection, T13 watchdog fault injection, OTA/partition changes, and any safety-policy change require separate explicit approval."

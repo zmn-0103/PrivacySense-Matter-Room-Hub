@@ -23,6 +23,7 @@ TEST_BTN_OBJ        = $(BUILD)/test_button_mode.o
 TEST_ENV_OBJ        = $(BUILD)/test_env_alert_sm.o
 TEST_NIGHT_OBJ      = $(BUILD)/test_night_window_sm.o
 TEST_NET_OBJ        = $(BUILD)/test_network_reconnect_sm.o
+TEST_HEALTH_OBJ     = $(BUILD)/test_health_diag.o
 
 # Test executables
 TEST_OCC   = $(BUILD)/test_occ_sm
@@ -31,10 +32,11 @@ TEST_BTN   = $(BUILD)/test_button_mode
 TEST_ENV   = $(BUILD)/test_env_alert_sm
 TEST_NIGHT = $(BUILD)/test_night_window_sm
 TEST_NET   = $(BUILD)/test_network_reconnect_sm
+TEST_HEALTH = $(BUILD)/test_health_diag
 
 .PHONY: all clean
 
-all: $(BUILD) $(TEST_OCC) $(TEST_UI) $(TEST_BTN) $(TEST_ENV) $(TEST_NIGHT) $(TEST_NET)
+all: $(BUILD) $(TEST_OCC) $(TEST_UI) $(TEST_BTN) $(TEST_ENV) $(TEST_NIGHT) $(TEST_NET) $(TEST_HEALTH)
 	@echo "=== Running occ_sm tests ===" && $(TEST_OCC)
 	@echo ""
 	@echo "=== Running ui_rgb tests ===" && $(TEST_UI)
@@ -46,6 +48,8 @@ all: $(BUILD) $(TEST_OCC) $(TEST_UI) $(TEST_BTN) $(TEST_ENV) $(TEST_NIGHT) $(TES
 	@echo "=== Running night_window_sm tests ===" && $(TEST_NIGHT)
 	@echo ""
 	@echo "=== Running network_reconnect_sm tests ===" && $(TEST_NET)
+	@echo ""
+	@echo "=== Running health_diag tests ===" && $(TEST_HEALTH)
 
 $(BUILD):
 	mkdir -p $(BUILD)
@@ -111,6 +115,13 @@ $(TEST_NET_OBJ): test_network_reconnect_sm.c ../../firmware/main/network_reconne
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 $(NET_RECONNECT_SM_OBJ): $(NET_RECONNECT_SM_SRC) ../../firmware/main/network_reconnect_sm.h | $(BUILD)
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+# ── health diagnostic classification tests (pure header logic) ──
+$(TEST_HEALTH): $(TEST_HEALTH_OBJ)
+	$(CC) $(CFLAGS) -o $@ $^
+
+$(TEST_HEALTH_OBJ): test_health_diag.c ../../firmware/main/health_diag.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 clean:
