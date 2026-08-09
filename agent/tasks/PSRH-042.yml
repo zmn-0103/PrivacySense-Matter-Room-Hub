@@ -19,6 +19,7 @@ review_scope:
     - "2f5d58379360d759aa4c6ffd8c5574ff247c2cf5"
     - "560734bd254ac1953327149a787b5525c3229648"
     - "87a3f4157630ed639e3f7d99fe70079fc3e51684"
+    - "0dda51d4aeef2a1717445dcb96c462094b8ed1ec"
   excluded_commits:
     - commit: "c341e512600e673ca23fb73b377a4a8052d1b3a1"
       reason: "Separately synchronized collaboration/governance documentation; not PSRH-042 functional delivery."
@@ -102,11 +103,20 @@ new_fabric_hil_verification:
     NIGHT_protection: "PASS — window-outside ChangeToMode(2) rejected with sanitized 0x0000002F"
     T17: "PARTIAL — accelerated automatic exit captured; automatic entry not separately captured"
     T19: "PARTIAL — offline local NORMAL -> QUIET captured; post-recovery latest-value read not verified because operational mDNS was not rediscovered"
-    controller_change_to_mode_success_path: "PASS — non-NIGHT-window controller HIL used the existing persistent storage for CurrentMode 0 -> ChangeToMode(1) Success -> 1 -> ChangeToMode(0) Success -> 0, then repeated 1 -> 0 for request-slot reuse; paired serial transition/error evidence is committed in tests/evidence/PSRH-042_controller_change_to_mode_hil_20260809.md (87a3f415)"
+    controller_change_to_mode_success_path: "PASS — authoritative rerun used the 2f5d583 default production BIN/ELF with the existing persistent storage for CurrentMode 0 -> ChangeToMode(1) Success -> 1 -> ChangeToMode(0) Success -> 0, then repeated 1 -> 0 for request-slot reuse; paired serial transition/error evidence is committed in tests/evidence/PSRH-042_controller_change_to_mode_hil_20260809.md (0dda51d4). The earlier 87a3f415 HIL record used the f8e5f9a HIL image and is superseded."
   recovery:
     controller_restart_same_storage: "PASS — independent chip-tool processes reused the persistent storage and re-established CASE"
     device_restart_case_ep_reads: "PARTIAL — ordinary restart restored CASE and EP2 read; post-restart EP1/EP2 pair not both retained"
     recommissioning: "DEFERRED — no further NVS/Fabric clearing was necessary"
+  controller_success_path_hil:
+    source_commit: "2f5d58379360d759aa4c6ffd8c5574ff247c2cf5"
+    branch_head_at_test: "a03194f012b11d916a9607c1df44079638b89912"
+    firmware_variant: "default production; PSRH_HIL_NIGHT_EXIT_AFTER_MS unset"
+    bin_sha256: "18571c257c0c4e459f4c92d6c7133fb6bd64abd155eec935749f0524f4f881ca"
+    elf_sha256: "74220b7982eca8707304e23e7cd298a950afc71e47778a0461f0295924924b67"
+    flash: "ordinary idf.py flash; bootloader/app/partition/OTA verified; no erase-flash, NVS clear, or commissioning"
+    result: "PASS — two complete 0 -> 1 -> 0 controller loops with CurrentMode reads and serial-side local transition/error scan"
+    evidence_commit: "0dda51d4aeef2a1717445dcb96c462094b8ed1ec"
 
 required_evidence:
   - "builder_handoff"

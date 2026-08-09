@@ -5,13 +5,13 @@
 - Task contract: [`agent/tasks/PSRH-042.yml`](../../agent/tasks/PSRH-042.yml)
 - Baseline commit: `02e67aa5216529ca83bff32bbf46ac1a8972e48d`
 - Branch/worktree: `agent/psrh-042-matter-v15` / `PrivacySense-Matter-Room-Hub-worktrees/psrh-042-matter-v15`
-- Fixed independent review target: `2392a3b54564fcc270faa54d98bbdc7e3d923298`, `b9dee960936e61b136ffb19598abd21ae9f456f2`, `54014834049fb44e7f3564e40b334b438a3bd10c`, `587243575138a3983c6658c4eb991d89ffa1de2f`, `5d2e356312b998b3f22a3f6b4855b49632756e51`, `6f498dffdd38eeaea257b9e6f23597bb2b45731b`, reviewer-remediation implementation `2f5d58379360d759aa4c6ffd8c5574ff247c2cf5`, frozen-state metadata `560734bd254ac1953327149a787b5525c3229648`, and controller HIL evidence `87a3f4157630ed639e3f7d99fe70079fc3e51684`.
+- Fixed independent review target: `2392a3b54564fcc270faa54d98bbdc7e3d923298`, `b9dee960936e61b136ffb19598abd21ae9f456f2`, `54014834049fb44e7f3564e40b334b438a3bd10c`, `587243575138a3983c6658c4eb991d89ffa1de2f`, `5d2e356312b998b3f22a3f6b4855b49632756e51`, `6f498dffdd38eeaea257b9e6f23597bb2b45731b`, reviewer-remediation implementation `2f5d58379360d759aa4c6ffd8c5574ff247c2cf5`, frozen-state metadata `560734bd254ac1953327149a787b5525c3229648`, historical HIL evidence `87a3f4157630ed639e3f7d99fe70079fc3e51684` (superseded), and authoritative production HIL evidence `0dda51d4aeef2a1717445dcb96c462094b8ed1ec`.
 - Roles: builder lead `gpt-5.6-terra`; builder `gpt-5.6-luna` with reasoning effort `max`; independent reviewer `gpt-5.6-sol`.
-- Independent review status: **PENDING RE-REVIEW**. The prior `REQUEST_CHANGES` conclusion remains in force until an independent reviewer accepts the remediation and the newly submitted controller success-path HIL; Builder does not self-certify a Reviewer PASS.
+- Independent review status: **PENDING RE-REVIEW**. The prior `REQUEST_CHANGES` conclusion remains in force until an independent reviewer accepts the remediation and the authoritative production-image controller success-path HIL; Builder does not self-certify a Reviewer PASS.
 - Explicitly excluded from PSRH-042 functional delivery, but separately accepted by Human Lead on 2026-08-09: `c341e512600e673ca23fb73b377a4a8052d1b3a1` / `c341e51` (collaboration/governance documentation).
 - Final implementation commit: `2f5d58379360d759aa4c6ffd8c5574ff247c2cf5` — addresses the four independent-review findings: controller request lifetime, atomic FORCE_SYNC generation, explicit HIL/release build gate, and retry-safe HIL exit state.
 - New Fabric HIL follow-up commit: `5d2e356` — adds the opt-in five-minute NIGHT exit test variant and binds the sanitized HIL acceptance results recorded below.
-- Controller success-path HIL evidence commit: `87a3f4157630ed639e3f7d99fe70079fc3e51684` — records the persistent-storage `CurrentMode 0 → 1 → 0` controller loop, one request-slot reuse loop, and the paired serial transition/error scan.
+- Controller success-path HIL evidence commit: `0dda51d4aeef2a1717445dcb96c462094b8ed1ec` — supersedes `87a3f415` and records the same persistent-storage loops on the `2f5d583` default production BIN/ELF, plus the paired serial transition/error scan.
 - Final review handoff: the tip produced by this metadata closeout is the fixed final HEAD; after it, no firmware or handoff changes are to be made before independent review.
 - Implementation paths in this closeout: `firmware/main/CMakeLists.txt`, `firmware/main/matter_app.cpp`, `firmware/main/matter_app.h`, `firmware/main/state_machine.c`, `firmware/main/state_machine.h`.
 - Delivery metadata paths explicitly requested by Human Lead: `agent/tasks/PSRH-042.yml`, this handoff, `tests/evidence/PSRH-042_matter_delta_acceptance_20260808.md`, `tests/evidence/PSRH-042_controller_change_to_mode_hil_20260809.md`, and `docs/session-summary-20260808.md`.
@@ -47,8 +47,9 @@ committed.
 | Host/component tests | `127/127 PASS` (17+20+10+21+25+34) | Current rerun log hash: `5192e245d11802a0663c014caacb4ca8bb0a000639c60d91e8d16c39c9627b50`. The host suite does not cover Matter timeout, late-event cancellation, or request-slot reuse; test sources are outside this task's `owned_paths`, so adding such coverage requires a Reviewer/Human Lead decision. |
 | Runtime stack evidence | Previous flashed image telemetry: radar 1980 B, UI 1156 B, state machine 4128 B, network 6256 B, env sensor 2192 B | No Matter-adapter high-water mark was captured; these values are not a post-patch HIL measurement. |
 | HEAD restricted 5-minute HIL build | `HEAD=f8e5f9a`; `PSRH_HIL_NIGHT_EXIT_AFTER_MS=300000`; `ninja -C <external-hil-build-dir> -j2` — exit `0` | Log SHA-256: `38099f5a904335ae9f85ba14fe363f4d5633c2ec6c41d754954c10c18c847999`; BIN `04623b72727d6ad96eef8dc2d37407be1b8649ff661cdfbac2c684a6c9e3bee5`; ELF `5d1aba7100a33266e5f270bb02b7515586c7c34c5583ba4ee31e5fea1528c220`; CMake reported the 300000 ms override; production default remains unchanged. |
-| HIL flash | `idf.py -B <external-hil-build-dir> -p /dev/ttyUSB0 flash` — PASS | No `erase-flash`; only bootloader/app/partition/OTA metadata were written; NVS/Fabric remained. Explicit Human Lead authorization was recorded in the session. |
-| Controller HIL | **PASS for the ChangeToMode success path; other items remain bounded separately** | The new controller loop and request-slot reuse are PASS; T14, T17, T19, and the device-restart endpoint pair remain PARTIAL at the evidence boundaries below. |
+| HIL flash | `idf.py -B <external-hil-build-dir> -p /dev/ttyUSB0 flash` — PASS | Historical five-minute HIL variant; no `erase-flash`; NVS/Fabric remained. It is not the authoritative controller success-path image. |
+| Frozen remediation production flash | `idf.py -B build -p /dev/ttyUSB0 flash` — PASS | `2f5d583` default production BIN `18571c257c0c4e459f4c92d6c7133fb6bd64abd155eec935749f0524f4f881ca`, ELF `74220b7982eca8707304e23e7cd298a950afc71e47778a0461f0295924924b67`; all four regions verified; no `erase-flash`, NVS/Fabric clear, or commissioning. |
+| Controller HIL | **PASS for the ChangeToMode success path on the frozen remediation production image; other items remain bounded separately** | The authoritative controller loop and request-slot reuse are PASS; T14, T17, T19, and the device-restart endpoint pair remain PARTIAL at the evidence boundaries below. |
 
 ### Image and resource records
 
@@ -87,28 +88,29 @@ does not compile on the locked SDK. Its persistent failure-log hash is
 | T09/T10/T12 | **PASS — prior evidence, not rerun** | Explicitly excluded from this closeout rerun. |
 | T15 commissioning | **PASS — historical summary only** | Previous session recorded success; the original `/tmp` log is gone and T15 was not rerun. |
 | T16 short test | **PASS — new Fabric HIL** | Same persistent storage read `CurrentMode 0 → 1 → 0`. |
-| Controller `ChangeToMode(1) → ChangeToMode(0)` success path | **PASS — controller HIL** | Same persistent storage: `CurrentMode 0 → ChangeToMode(1) Success → 1 → ChangeToMode(0) Success → 0`; the loop was repeated once for request-slot reuse. Serial-side local commits matched all four transitions and the specified error scan was clear. Evidence: `tests/evidence/PSRH-042_controller_change_to_mode_hil_20260809.md` in commit `87a3f415`. |
+| Controller `ChangeToMode(1) → ChangeToMode(0)` success path | **PASS — frozen remediation production-image HIL** | Same persistent storage: `CurrentMode 0 → ChangeToMode(1) Success → 1 → ChangeToMode(0) Success → 0`; the loop was repeated once for request-slot reuse. Serial-side local commits matched all four transitions and the specified error scan was clear. Evidence: `tests/evidence/PSRH-042_controller_change_to_mode_hil_20260809.md` in authoritative commit `0dda51d4`; earlier `87a3f415` record is superseded. |
 | NIGHT `ChangeToMode(2)` guard | **PASS — new Fabric HIL** | Controller request outside the window failed with sanitized `0x0000002F`. |
 | T17 | **PARTIAL — new Fabric HIL** | Five-minute HIL variant captured automatic exit and post-exit `CurrentMode=0`; automatic entry was not separately captured. |
 | T19 | **PARTIAL — new Fabric HIL** | Offline `NORMAL→QUIET` was captured; after AP restore `_matter._tcp` was not discovered and latest-value read timed out. |
 | Controller restart with same storage | **PASS — new Fabric HIL** | Independent chip-tool processes reused persistent storage and re-established CASE. |
 | Device restart CASE/EP reads | **PARTIAL — new Fabric HIL** | Ordinary restart restored CASE and EP2 read; post-restart EP1/EP2 pair was not both retained. |
-| P1 independent review | **PENDING RE-REVIEW** | Historical conclusion is `REQUEST_CHANGES`; final status awaits independent review of `2f5d583`, the frozen image, HIL evidence commit `87a3f415`, and the final HEAD. |
+| P1 independent review | **PENDING RE-REVIEW** | Historical conclusion is `REQUEST_CHANGES`; final status awaits independent review of `2f5d583`, the frozen production image, authoritative HIL evidence commit `0dda51d4`, and the final HEAD. |
 
 ## Evidence retention and safety
 
 - The historical T14 log path was `/tmp/psrh-042-t14-mirrored-20260808-r2/commission.log`; the historical T15 log path was `/tmp/psrh-042-t15-mirrored-20260808/commission.log`. Both paths were checked and are absent. Therefore there is no source file to copy or SHA-256 to record; no replacement hash is fabricated.
 - Persistent build, clean-build, size, host-test, and sanitized HIL evidence are stored outside the repository at `/home/administrator/Project/PrivacySense-Matter-Room-Hub-artifacts/psrh-042-matter-v15/20260808/`; the retained build/size/test hashes are recorded above. The HIL evidence directory contains only sanitized conclusions and no raw controller/serial log.
 - Raw controller logs, Fabric storage, credentials, setup payloads, MAC addresses, and complete IPv6 addresses are not committed.
-- The 2026-08-09 controller HIL raw chip-tool/serial captures remain outside the repository in the controlled `20260809/review-remediation-private/` artifact area; only the sanitized summary in `87a3f415` is in Git.
+- The authoritative 2026-08-09 production-image controller HIL raw chip-tool/serial captures remain outside the repository in the controlled `20260809/review-remediation-private/` artifact area; only the corrected sanitized summary in `0dda51d4` is authoritative. The earlier `87a3f415` summary is retained for audit history but superseded.
 - A factory reset was explicitly authorized and performed before the new Fabric HIL. The 5-minute HIL image was explicitly authorized and flashed without `erase-flash`; no later NVS erase or re-commissioning was performed.
 - Other branches were inspected read-only and not modified. Pre-existing collaboration/documentation commit `c341e51` changes `AGENTS.md`, `agent/task_templates/task-contract.yml`, and `docs/multi-agent-development.md`; it remains outside PSRH-042 functional delivery, but Human Lead separately accepted it on 2026-08-09, so it is no longer a merge blocker. No history rewrite was performed.
 
 ## Handoff condition
 
 The controller `ChangeToMode(1) → ChangeToMode(0)` success-path HIL is now
-recorded outside the NIGHT window and bound to evidence commit `87a3f415`.
+recorded outside the NIGHT window on the frozen remediation production image
+and bound to authoritative evidence commit `0dda51d4`.
 The branch remains `PENDING_REVIEW` / historical `REQUEST_CHANGES`; it cannot
-enter `READY_TO_MERGE` until an independent Reviewer reviews `2f5d583`, the HIL
+enter `READY_TO_MERGE` until an independent Reviewer reviews `2f5d583`, the corrected HIL
 evidence, and the fixed final HEAD, then provides a final conclusion. Human Lead
 must separately accept any remaining PARTIAL items before integration.
