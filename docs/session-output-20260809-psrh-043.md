@@ -3,9 +3,11 @@
 ## 结论
 
 本次 PSRH-043 集成、构建、资源测量和授权 Hardware Lab 采集已完成。
-静态构建与运行时资源快照通过，但传感器恢复、受控 Wi-Fi 断线和真正
-power-cycle 尚未闭环，因此任务状态保持 `INTEGRATION`，不能标记为最终
-验收 PASS。
+后续授权会话已使用同一精确镜像补齐 BLE 重新 commissioning、DHT22
+正常/故障/恢复、受控 Wi-Fi 断开/恢复和真实 power-cycle；所有请求的 HIL
+门禁现均有 Builder PASS 证据。独立 Reviewer `gpt-5.6-sol` 已对新增证据、
+精确镜像和固定最终 HEAD 完成复审并给出 PASS。Human Lead 已于 2026-08-09
+明确接受，任务状态更新为 `READY_TO_MERGE`。
 
 ## 集成身份
 
@@ -17,7 +19,7 @@ power-cycle 尚未闭环，因此任务状态保持 `INTEGRATION`，不能标记
 - 证据收口提交：`a21cf00bfd8c01162cb3e47977e0e5d67ff82a70`
 - Builder Lead：Human Lead
 - Builder：Codex (Builder AI)
-- Independent Reviewer：待分配，必须独立于 Builder
+- Independent Reviewer：`gpt-5.6-sol`，最终复审 `4af6c635`，结论 PASS
 
 ## 构建与资源
 
@@ -57,10 +59,18 @@ Meditation、abort、stack overflow 或 protocol timeout。
 
 - Matter EP1 Occupancy 读取 `1`，EP2 CurrentMode 读取 `0`；ModeSelect
   `NORMAL → QUIET → NORMAL` 回读 `0 → 1 → 0`；普通复位后的控制器恢复读取通过。
-- Wi-Fi 启动阶段观察到断开后重新获 IP并恢复连接；受控的已连接状态 AP 断开未执行。
-- LD2410C radar heartbeat 正常；DHT22 连续解析失败，未捕获有效样本或传感器恢复。
-- BLE 启动、host sync、已 commission 后停止 advertising 和 deinit 已观察；未重新 commissioning。
-- 当前实验室没有受控电源继电器，power-cycle recovery 未捕获。
+- DHT22 接线修复后连续获得有效温湿度样本；拔除 DATA 后记录三次失败、
+  `online → offline` 和 `P1-sensor-fail`，接回 DATA 后记录有效样本与
+  `offline → online`，恢复后继续稳定采样。
+- 在设备稳定联网并完成 CASE/属性基线后关闭 AP；断网期间本地 DHT22、
+  radar、状态机、UI 和资源快照持续运行。AP 恢复后设备重新获 IP、重新发布
+  operational `_matter._tcp`，CASE 成功并复读 Occupancy `1`、CurrentMode `0`。
+- 授权 BLE follow-up 已完成精确 `nvs`/`ps_cfg` 擦除和真实 BLE Wi-Fi
+  commissioning，`CommissioningComplete errorCode=0`；新 Fabric 的属性和普通
+  reset 恢复均通过。
+- 真实 power-cycle 通过物理拔插 USB 完成，串口设备消失 29 秒后重新枚举；
+  operational mDNS、Fabric/CASE、Occupancy `1`、CurrentMode `0`、DHT22、radar
+  和 16/16、`truncated=no` 资源快照均恢复。RTS/reset 未被用作替代证据。
 
 ## 证据位置
 
@@ -73,9 +83,18 @@ Meditation、abort、stack overflow 或 protocol timeout。
   `/home/administrator/Project/PrivacySense-Matter-Room-Hub-artifacts/psrh-043-phase5-integration/20260809/closeout`
 - 外部 `evidence-files.sha256`：42 项，SHA-256
   `929d47f7d0e176b8611cddf3c31016e0440e2590de1a51bc40470d704036d143`
+- 授权 BLE 独立证据根目录：
+  `/home/administrator/Project/PrivacySense-Matter-Room-Hub-artifacts/psrh-043-phase5-integration/20260809/ble-direct-20260809`
+- BLE `evidence-files.sha256`：8 项，SHA-256
+  `4ef5aa8bd65f3f4dc0ff8f9cc5ccb6e3ccb4957a64c8e0198d631fc4e0b5b6fb`
+- 最终 HIL closeout 独立证据根目录：
+  `/home/administrator/Project/PrivacySense-Matter-Room-Hub-artifacts/psrh-043-phase5-integration/20260809/hil-closeout-20260809`
+- HIL closeout `evidence-files.sha256`：15 项，SHA-256
+  `1792415f3734a81147d349d384999f0cf454c07ef6a75ea48d4f71e82e5362fb`
 
 ## 后续门禁
 
-补齐 DHT22 接线/供电/上拉并重测正常与恢复路径；执行受控 Wi-Fi
-disconnect/recovery；提供可验证的 power-cycle 控制并重测。若任一后续快照
-出现 `truncated=yes`，必须修正诊断容量、重新构建并使用新的精确 BIN 重测。
+三个剩余 HIL 门禁和 BLE 边界均已关闭。下一步只进行证据/文档工作区收口，
+独立 Reviewer 已更新旧的 pre-closeout 结论并审查固定最终 HEAD，Human Lead
+也已明确接受。当前可进行收口提交和后续合并；若提交前发现任何镜像、固件、
+manifest 或实质证据变化，必须重新绑定相应哈希并重跑受影响门禁及独立审查。

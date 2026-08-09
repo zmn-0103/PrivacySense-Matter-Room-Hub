@@ -1,10 +1,10 @@
 task_id: "PSRH-043"
 title: "Phase 5 reliability diagnostics and resource closure"
-status: "INTEGRATION"
+status: "READY_TO_MERGE" # 独立 Reviewer PASS，Human Lead 已明确接受
 goal: "并行完成阶段 5 的项目告警清理、资源诊断基线和可靠性证据准备，不触碰 PSRH-042 Matter 适配路径或改变冻结的安全策略"
 owner: "Builder Lead: Human Lead"
 builder: "Codex (Builder AI)"
-reviewer: "Independent Reviewer (pending assignment)"
+reviewer: "gpt-5.6-sol"
 baseline_commit: "02e67aa5216529ca83bff32bbf46ac1a8972e48d"
 
 owned_paths:
@@ -61,9 +61,13 @@ integration_verification:
   artifact_root: "/home/administrator/Project/PrivacySense-Matter-Room-Hub-artifacts/psrh-043-phase5-integration/20260809/closeout"
   artifact_manifest: "evidence-files.sha256"
   artifact_manifest_sha256: "929d47f7d0e176b8611cddf3c31016e0440e2590de1a51bc40470d704036d143"
-  result: "Fresh compatible baseline and integrated ESP32-C6 build/size PASS with corrected delta; exact-BIN runtime snapshots PASS with tasks/captured within capacity and truncated=no; DHT22 recovery, controlled Wi-Fi disconnect/recovery, verified power-cycle, remaining BLE commissioning scope, independent Reviewer assignment/review, and Human Lead acceptance remain pending."
+  ble_artifact_root: "/home/administrator/Project/PrivacySense-Matter-Room-Hub-artifacts/psrh-043-phase5-integration/20260809/ble-direct-20260809"
+  ble_manifest_sha256: "4ef5aa8bd65f3f4dc0ff8f9cc5ccb6e3ccb4957a64c8e0198d631fc4e0b5b6fb"
+  hil_closeout_artifact_root: "/home/administrator/Project/PrivacySense-Matter-Room-Hub-artifacts/psrh-043-phase5-integration/20260809/hil-closeout-20260809"
+  hil_closeout_manifest_sha256: "1792415f3734a81147d349d384999f0cf454c07ef6a75ea48d4f71e82e5362fb"
+  result: "Fresh compatible baseline and integrated ESP32-C6 build/size PASS with corrected delta; exact-BIN runtime snapshots, authorized BLE re-commissioning, DHT22 normal/failure/recovery, controlled post-connected Wi-Fi disconnect/recovery, true power-cycle recovery, Matter CASE, and attribute rereads are evidenced PASS. Independent Reviewer PASS is bound to 4af6c6350e070a3129b63596587d46042cf34148, and Human Lead explicitly accepted the result on 2026-08-09."
   hil_verification:
-    status: "PARTIAL; task remains INTEGRATION"
+    status: "PASS; independently reviewed at 4af6c6350e070a3129b63596587d46042cf34148 and accepted by Human Lead"
     app_bin_sha256: "3496c18164cb3410a3e19d83a6a1357151b4cea8ca20840f4492b58a8f81294c"
     app_elf_sha256: "c56bd237359ec34685d2c795a72ea4a1be30c9477694648f69e3dddf198572cc"
     app_map_sha256: "1bf52bcdd61265757f8b4f839c32a2f877ed089ff466260acb2e69b64f5fab7f"
@@ -76,10 +80,10 @@ integration_verification:
     runtime_snapshot_gate: "PASS; boot/tasks_ready/network_periodic captured; tasks<=32; captured==tasks; truncated=no"
     matter_smoke: "PASS; Occupancy=1; CurrentMode NORMAL=0; ModeSelect QUIET=1 then NORMAL=0"
     matter_controller_recovery: "PASS after ordinary reset using same persistent controller storage"
-    wifi: "PARTIAL; startup disconnect/reconnect observed, controlled post-connected AP disconnect not captured"
-    dht22: "FAIL/NOT_CAPTURED; repeated parse failures, no valid sample or recovery"
-    ble: "PARTIAL; BLE startup/sync/deinit observed, re-commissioning not repeated"
-    power_cycle: "NOT_CAPTURED; no controlled power relay"
+    wifi: "PASS; controlled post-connected AP outage captured, local tasks/sensors remained active, then IP, operational mDNS, CASE, Occupancy=1, and CurrentMode=0 recovered"
+    dht22: "PASS; valid temperature/humidity samples captured, DATA disconnect produced online->offline and P1-sensor-fail, DATA restore produced valid sample and offline->online"
+    ble: "PASS; separately authorized exact-image nvs/ps_cfg erase and BLE Wi-Fi re-commissioning completed with CommissioningComplete errorCode=0"
+    power_cycle: "PASS; physical USB power removal observed as 29-second serial-device absence, followed by operational mDNS, CASE, attributes, sensors, and 16/16 truncated=no resource snapshots"
 
 review_scope:
   included:
@@ -109,6 +113,10 @@ delivery_metadata:
   external_artifact_root: "/home/administrator/Project/PrivacySense-Matter-Room-Hub-artifacts/psrh-043-phase5-integration/20260809/closeout"
   external_manifest: "evidence-files.sha256"
   external_manifest_sha256: "929d47f7d0e176b8611cddf3c31016e0440e2590de1a51bc40470d704036d143"
+  ble_external_artifact_root: "/home/administrator/Project/PrivacySense-Matter-Room-Hub-artifacts/psrh-043-phase5-integration/20260809/ble-direct-20260809"
+  ble_external_manifest_sha256: "4ef5aa8bd65f3f4dc0ff8f9cc5ccb6e3ccb4957a64c8e0198d631fc4e0b5b6fb"
+  hil_closeout_external_artifact_root: "/home/administrator/Project/PrivacySense-Matter-Room-Hub-artifacts/psrh-043-phase5-integration/20260809/hil-closeout-20260809"
+  hil_closeout_external_manifest_sha256: "1792415f3734a81147d349d384999f0cf454c07ef6a75ea48d4f71e82e5362fb"
   hil_evidence: "tests/evidence/PSRH-043_hardware_deferral.md"
 
 acceptance:
@@ -118,6 +126,30 @@ acceptance:
   - "Run project Host tests and an isolated ESP32-C6 build with -j2; record exact commands, exit codes, toolchain commits, size, and warning summary"
   - "Prepare sanitized Phase 5 evidence for resource measurements and explicitly defer tests that require the integrated PSRH-042 firmware or hardware"
   - "After PSRH-042 integration, re-run the final build/size and hardware resource capture before declaring Phase 5 PASS"
+
+independent_review:
+  conclusion: "PASS"
+  reviewer: "gpt-5.6-sol"
+  branch: "agent/psrh-043-phase5-integration"
+  reviewed_head: "4af6c6350e070a3129b63596587d46042cf34148"
+  reviewed_at: "2026-08-09"
+  firmware_merge_commit: "c2a0ff09d70775a9d582bb3e8a71e455cfb49529"
+  app_bin_sha256: "3496c18164cb3410a3e19d83a6a1357151b4cea8ca20840f4492b58a8f81294c"
+  evidence_manifests:
+    closeout_42: "929d47f7d0e176b8611cddf3c31016e0440e2590de1a51bc40470d704036d143"
+    ble_8: "4ef5aa8bd65f3f4dc0ff8f9cc5ccb6e3ccb4957a64c8e0198d631fc4e0b5b6fb"
+    final_hil_15: "1792415f3734a81147d349d384999f0cf454c07ef6a75ea48d4f71e82e5362fb"
+  scope: "Static integration review, exact-image build/resource evidence, all three external manifests, BLE re-commissioning, DHT22 normal/failure/recovery, controlled Wi-Fi outage/recovery, true power-cycle recovery, Matter CASE/attribute reads, runtime snapshots, and current metadata-only worktree differences."
+  disposition: "No blocking findings. Independent review is PASS and Human Lead acceptance is recorded below. Any firmware, image, manifest, or substantive evidence change requires fresh review."
+
+human_lead_acceptance:
+  accepted: true
+  accepted_by: "Human Lead (explicit user acceptance)"
+  accepted_at: "2026-08-09"
+  accepted_boundaries:
+    - "All requested HIL gates are PASS; no residual PARTIAL hardware gate is accepted by exception."
+    - "The acceptance is bound to reviewed HEAD 4af6c6350e070a3129b63596587d46042cf34148, the exact App BIN, and the three recorded evidence manifests."
+  disposition: "Accepted for READY_TO_MERGE. Any firmware, image, manifest, or substantive evidence change requires fresh independent review and acceptance."
 
 required_evidence:
   - "builder_handoff"

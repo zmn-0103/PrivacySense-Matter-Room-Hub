@@ -5,7 +5,7 @@
 - Task contract: agent/tasks/PSRH-043.yml
 - Builder Lead: Human Lead
 - Builder: Codex (Builder AI)
-- Independent Reviewer: pending assignment; must be independent of Builder
+- Independent Reviewer: gpt-5.6-sol; final review PASS at `4af6c635`
 - Review scope: PSRH-043 owned implementation, host tests, integrated
   ESP32-C6 build, warning classification, static resource delta, artifact
   identity, and the explicit runtime/HIL gate
@@ -18,7 +18,7 @@
 - Integration HEAD used for the fresh firmware build:
   0d403f13ec0a0e4b2c32e16f35893f987606ae1d
 - Date: 2026-08-09
-- Current disposition: INTEGRATION
+- Current disposition: READY_TO_MERGE
 
 The later evidence-only commits do not change firmware inputs. The
 integration HEAD above is the exact source identity recorded by the fresh
@@ -36,6 +36,14 @@ The task contract explicitly declares the following delivery metadata:
 - external manifest:
   evidence-files.sha256, SHA-256
   929d47f7d0e176b8611cddf3c31016e0440e2590de1a51bc40470d704036d143
+- authorized BLE evidence root:
+  /home/administrator/Project/PrivacySense-Matter-Room-Hub-artifacts/psrh-043-phase5-integration/20260809/ble-direct-20260809
+- BLE evidence manifest SHA-256:
+  4ef5aa8bd65f3f4dc0ff8f9cc5ccb6e3ccb4957a64c8e0198d631fc4e0b5b6fb
+- final HIL closeout evidence root:
+  /home/administrator/Project/PrivacySense-Matter-Room-Hub-artifacts/psrh-043-phase5-integration/20260809/hil-closeout-20260809
+- final HIL closeout manifest SHA-256:
+  1792415f3734a81147d349d384999f0cf454c07ef6a75ea48d4f71e82e5362fb
 
 The review includes the owned implementation paths only. The PSRH-042
 Matter/state-machine files, approved interfaces/data-model documents, and
@@ -75,7 +83,7 @@ compatibility and upstream dependency warnings remain visible and classified.
 | Fresh integrated target build | PASS; exit 0; 1498/1498 | build.log SHA-256 ebe350c91427e667073ffaee4f4c396e27915860f45e7c7196297b935ede4ad9 |
 | Integrated size | PASS; exit 0 | size.log SHA-256 198e392157edb27a9f4d16f2fa1b3d32b92d87f3c810326edaf7dc81fa648b45 |
 | Warning classification | PASS as classification; no suppression | warning-classification.log SHA-256 496f164a30a7bf2cb029ba2c36db9c0f1753607b9aaa6f226a5ffaea15623d22 |
-| Hardware/runtime HIL | PARTIAL; runtime resource gate PASS, protocol/sensor/power gates remain open | PSRH-043_hardware_deferral.md; external HIL logs |
+| Hardware/runtime HIL | PASS; all resource, BLE, DHT22, controlled Wi-Fi, Matter, and true power-cycle gates captured and independently reviewed | PSRH-043_hardware_deferral.md; three external evidence roots |
 
 The compatible baseline was rebuilt with the same fresh flow. Its App BIN is
 0x1d1120, not the earlier unbound 0x1d0d80 value. Baseline build and size
@@ -116,30 +124,41 @@ all were `truncated=no`, with `tasks/captured` of `4/4`, `17/17`, and
 `integrated-c2a0ff0/hil-runtime-recovery-01.log`, SHA-256
 `6969a14b3cf8d7e572ff11f7ecf149a4f8ea900ff3544612301cb960e2d76cce`.
 
-Matter smoke and controller recovery passed using the same persistent storage:
-EP1 Occupancy read `1`, EP2 CurrentMode read `0`, and the controlled
+Matter smoke and ordinary-reset controller recovery passed using persistent
+storage: EP1 Occupancy read `1`, EP2 CurrentMode read `0`, and the controlled
 ModeSelect sequence read `1` for QUIET and `0` after restoration to NORMAL.
-The serial logs show Wi-Fi startup disconnect/reconnect and Matter mDNS
-publication, but no controlled post-connected Wi-Fi disconnect was available.
-DHT22 produced repeated parse failures with no valid sample/recovery, and the
-lab topology had no verified power-cycle control. BLE startup/synchronization
-and post-commissioning deinit were observed; re-commissioning was not repeated
-without a separately authorized factory-reset/setup-payload flow.
+The separately authorized BLE follow-up then performed a precise `nvs` and
+`ps_cfg` erase and true BLE Wi-Fi re-commissioning with the unchanged exact
+image; CommissioningComplete returned `errorCode=0` and the new Fabric passed
+the same Matter reads.
 
-The task therefore remains `INTEGRATION`: static build/resource evidence and
-the bounded runtime snapshot gate are PASS, while the remaining HIL gates and
-independent Reviewer/Human Lead acceptance are pending. The complete list of
-sanitized HIL log hashes is in `PSRH-043_hardware_deferral.md` and the
-top-level external manifest.
+Final HIL closeout corrected the DHT22 wiring and captured stable valid
+temperature/humidity samples, `online -> offline` plus `P1-sensor-fail` after
+the DATA jumper was removed, and a valid sample plus `offline -> online` after
+DATA was restored. A post-connected AP outage captured Wi-Fi loss while the
+local state machine, DHT22, radar, UI, and 16/16 resource snapshots continued;
+after AP restoration the device regained IP, republished operational mDNS,
+completed fresh CASE sessions, and returned Occupancy `1` and CurrentMode `0`.
+
+A true USB power removal was independently observed as serial-device loss from
+17:41:51 to 17:42:20 (29 seconds). After re-enumeration the unchanged device
+republished operational mDNS, restored Fabric index 1, completed two new CASE
+sessions, returned Occupancy `1` and CurrentMode `0`, resumed valid DHT22 and
+radar data, and produced 16/16 `truncated=no` snapshots with minimum HWM
+1,280 B. The new logs contain no panic, abort, stack overflow, TWDT failure,
+protocol timeout, or `truncated=yes`.
+
+All requested Hardware Lab gates are evidenced by the Builder. Independent
+Reviewer `gpt-5.6-sol` reviewed the fixed HEAD, exact image, three manifests,
+and retained logs and concluded PASS. Human Lead explicitly accepted the
+result on 2026-08-09; the task is `READY_TO_MERGE`.
 
 ## Handoff disposition
 
 Static integrated build, Host tests, warning classification, corrected
-resource measurement, and the bounded runtime snapshot gate are PASS for the
-integration check. The task remains INTEGRATION: DHT22 normal/recovery,
-controlled Wi-Fi disconnect/recovery, verified power-cycle recovery, any
-required BLE commissioning cycle, independent Reviewer assessment, and Human
-Lead acceptance are still required. If a future HIL snapshot reports
-truncated=yes, the diagnostic capacity must be fixed and the image rebuilt
-before acceptance. This handoff does not declare Phase 5 fully PASS, merge to
-main, push, or create a PR.
+resource measurement, bounded runtime snapshots, BLE re-commissioning,
+DHT22 normal/failure/recovery, controlled Wi-Fi disconnect/recovery, Matter
+recovery, and true power-cycle recovery are PASS and have received independent
+Reviewer PASS at `4af6c635`. Human Lead acceptance is recorded, so the task is
+`READY_TO_MERGE`. This handoff does not itself merge to main, push, or create
+a PR.
