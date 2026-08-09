@@ -18,6 +18,7 @@ review_scope:
     - "6f498dffdd38eeaea257b9e6f23597bb2b45731b"
     - "2f5d58379360d759aa4c6ffd8c5574ff247c2cf5"
     - "560734bd254ac1953327149a787b5525c3229648"
+    - "87a3f4157630ed639e3f7d99fe70079fc3e51684"
   excluded_commits:
     - commit: "c341e512600e673ca23fb73b377a4a8052d1b3a1"
       reason: "Separately synchronized collaboration/governance documentation; not PSRH-042 functional delivery."
@@ -45,6 +46,7 @@ delivery_scope:
     - "agent/tasks/PSRH-042.yml"
     - "tests/evidence/PSRH-042_builder_handoff.md"
     - "tests/evidence/PSRH-042_matter_delta_acceptance_20260808.md"
+    - "tests/evidence/PSRH-042_controller_change_to_mode_hil_20260809.md"
     - "docs/session-summary-20260808.md"
   approval: "Human Lead explicitly requested this implementation, task-contract, sanitized-evidence, handoff, and acceptance-summary closeout on 2026-08-08. The approved implementation/build scope includes firmware/main/CMakeLists.txt plus the four listed source/header files; metadata paths are delivery artifacts."
   excluded_preexisting_history:
@@ -100,7 +102,7 @@ new_fabric_hil_verification:
     NIGHT_protection: "PASS — window-outside ChangeToMode(2) rejected with sanitized 0x0000002F"
     T17: "PARTIAL — accelerated automatic exit captured; automatic entry not separately captured"
     T19: "PARTIAL — offline local NORMAL -> QUIET captured; post-recovery latest-value read not verified because operational mDNS was not rediscovered"
-    controller_change_to_mode_success_path: "DEFERRED — production-firmware controller 0 -> 1 -> 0 path requires a non-NIGHT-window HIL run; it is not substituted by the physical-button T16 result"
+    controller_change_to_mode_success_path: "PASS — non-NIGHT-window controller HIL used the existing persistent storage for CurrentMode 0 -> ChangeToMode(1) Success -> 1 -> ChangeToMode(0) Success -> 0, then repeated 1 -> 0 for request-slot reuse; paired serial transition/error evidence is committed in tests/evidence/PSRH-042_controller_change_to_mode_hil_20260809.md (87a3f415)"
   recovery:
     controller_restart_same_storage: "PASS — independent chip-tool processes reused the persistent storage and re-established CASE"
     device_restart_case_ep_reads: "PARTIAL — ordinary restart restored CASE and EP2 read; post-restart EP1/EP2 pair not both retained"
