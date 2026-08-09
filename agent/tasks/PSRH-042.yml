@@ -1,6 +1,6 @@
 task_id: "PSRH-042"
 title: "Matter API compatibility on ESP-Matter release/v1.5"
-status: "PENDING_REVIEW" # 待审
+status: "REVIEWER_PASS" # 独立 Reviewer 已通过；等待 Human Lead 接受剩余证据边界
 goal: "在锁定的 ESP-Matter release/v1.5 上完成 Matter API 兼容、保持 EP0/EP1/EP2 数据模型不变，并产生构建/size/测试证据"
 builder_lead: "gpt-5.6-terra"
 owner: "gpt-5.6-luna"
@@ -20,6 +20,7 @@ review_scope:
     - "560734bd254ac1953327149a787b5525c3229648"
     - "87a3f4157630ed639e3f7d99fe70079fc3e51684"
     - "0dda51d4aeef2a1717445dcb96c462094b8ed1ec"
+    - "7ebb6eec5f40d9f95a02e2dc1119887c4f0f3aee"
   excluded_commits:
     - commit: "c341e512600e673ca23fb73b377a4a8052d1b3a1"
       reason: "Separately synchronized collaboration/governance documentation; not PSRH-042 functional delivery."
@@ -117,6 +118,18 @@ new_fabric_hil_verification:
     flash: "ordinary idf.py flash; bootloader/app/partition/OTA verified; no erase-flash, NVS clear, or commissioning"
     result: "PASS — two complete 0 -> 1 -> 0 controller loops with CurrentMode reads and serial-side local transition/error scan"
     evidence_commit: "0dda51d4aeef2a1717445dcb96c462094b8ed1ec"
+
+independent_review:
+  conclusion: "PASS"
+  reviewer: "gpt-5.6-sol"
+  branch: "agent/psrh-042-matter-v15"
+  reviewed_head: "7ebb6eec5f40d9f95a02e2dc1119887c4f0f3aee"
+  implementation_commit: "2f5d58379360d759aa4c6ffd8c5574ff247c2cf5"
+  authoritative_hil_evidence_commit: "0dda51d4aeef2a1717445dcb96c462094b8ed1ec"
+  superseded_evidence_commit: "87a3f4157630ed639e3f7d99fe70079fc3e51684"
+  reviewed_at: "2026-08-09"
+  scope: "No new blocking issues; production default, HIL/CMake isolation, retry-safe exit, request lifetime, FORCE_SYNC generation, request-slot reuse, production-image HIL, image hashes, diff hygiene, firmware freeze, and clean worktree accepted."
+  gate: "Human Lead must explicitly accept T14, T17, T19, and the device-restart EP1/EP2 evidence boundary before READY_TO_MERGE or integration."
 
 required_evidence:
   - "builder_handoff"

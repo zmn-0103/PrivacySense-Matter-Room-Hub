@@ -5,14 +5,14 @@
 - Task contract: [`agent/tasks/PSRH-042.yml`](../../agent/tasks/PSRH-042.yml)
 - Baseline commit: `02e67aa5216529ca83bff32bbf46ac1a8972e48d`
 - Branch/worktree: `agent/psrh-042-matter-v15` / `PrivacySense-Matter-Room-Hub-worktrees/psrh-042-matter-v15`
-- Fixed independent review target: `2392a3b54564fcc270faa54d98bbdc7e3d923298`, `b9dee960936e61b136ffb19598abd21ae9f456f2`, `54014834049fb44e7f3564e40b334b438a3bd10c`, `587243575138a3983c6658c4eb991d89ffa1de2f`, `5d2e356312b998b3f22a3f6b4855b49632756e51`, `6f498dffdd38eeaea257b9e6f23597bb2b45731b`, reviewer-remediation implementation `2f5d58379360d759aa4c6ffd8c5574ff247c2cf5`, frozen-state metadata `560734bd254ac1953327149a787b5525c3229648`, historical HIL evidence `87a3f4157630ed639e3f7d99fe70079fc3e51684` (superseded), and authoritative production HIL evidence `0dda51d4aeef2a1717445dcb96c462094b8ed1ec`.
+- Fixed independent review target: `2392a3b54564fcc270faa54d98bbdc7e3d923298`, `b9dee960936e61b136ffb19598abd21ae9f456f2`, `54014834049fb44e7f3564e40b334b438a3bd10c`, `587243575138a3983c6658c4eb991d89ffa1de2f`, `5d2e356312b998b3f22a3f6b4855b49632756e51`, `6f498dffdd38eeaea257b9e6f23597bb2b45731b`, reviewer-remediation implementation `2f5d58379360d759aa4c6ffd8c5574ff247c2cf5`, frozen-state metadata `560734bd254ac1953327149a787b5525c3229648`, historical HIL evidence `87a3f4157630ed639e3f7d99fe70079fc3e51684` (superseded), authoritative production HIL evidence `0dda51d4aeef2a1717445dcb96c462094b8ed1ec`, and reviewed final HEAD `7ebb6eec5f40d9f95a02e2dc1119887c4f0f3aee`.
 - Roles: builder lead `gpt-5.6-terra`; builder `gpt-5.6-luna` with reasoning effort `max`; independent reviewer `gpt-5.6-sol`.
-- Independent review status: **PENDING RE-REVIEW**. The prior `REQUEST_CHANGES` conclusion remains in force until an independent reviewer accepts the remediation and the authoritative production-image controller success-path HIL; Builder does not self-certify a Reviewer PASS.
+- Independent review status: **PASS** (`gpt-5.6-sol`, 2026-08-09). The conclusion is bound to branch `agent/psrh-042-matter-v15`, reviewed HEAD `7ebb6eec5f40d9f95a02e2dc1119887c4f0f3aee`, implementation `2f5d58379360d759aa4c6ffd8c5574ff247c2cf5`, and authoritative production HIL evidence `0dda51d4aeef2a1717445dcb96c462094b8ed1ec`. The historical `REQUEST_CHANGES` and `87a3f415` evidence are superseded; Builder does not self-certify this PASS.
 - Explicitly excluded from PSRH-042 functional delivery, but separately accepted by Human Lead on 2026-08-09: `c341e512600e673ca23fb73b377a4a8052d1b3a1` / `c341e51` (collaboration/governance documentation).
 - Final implementation commit: `2f5d58379360d759aa4c6ffd8c5574ff247c2cf5` — addresses the four independent-review findings: controller request lifetime, atomic FORCE_SYNC generation, explicit HIL/release build gate, and retry-safe HIL exit state.
 - New Fabric HIL follow-up commit: `5d2e356` — adds the opt-in five-minute NIGHT exit test variant and binds the sanitized HIL acceptance results recorded below.
 - Controller success-path HIL evidence commit: `0dda51d4aeef2a1717445dcb96c462094b8ed1ec` — supersedes `87a3f415` and records the same persistent-storage loops on the `2f5d583` default production BIN/ELF, plus the paired serial transition/error scan.
-- Final review handoff: the tip produced by this metadata closeout is the fixed final HEAD; after it, no firmware or handoff changes are to be made before independent review.
+- Final review handoff: the independent Reviewer accepted the fixed reviewed HEAD above. This closeout is metadata-only; it must not modify `firmware/`. Any later firmware change or integration merge requires a new review of the resulting HEAD.
 - Implementation paths in this closeout: `firmware/main/CMakeLists.txt`, `firmware/main/matter_app.cpp`, `firmware/main/matter_app.h`, `firmware/main/state_machine.c`, `firmware/main/state_machine.h`.
 - Delivery metadata paths explicitly requested by Human Lead: `agent/tasks/PSRH-042.yml`, this handoff, `tests/evidence/PSRH-042_matter_delta_acceptance_20260808.md`, `tests/evidence/PSRH-042_controller_change_to_mode_hil_20260809.md`, and `docs/session-summary-20260808.md`.
 
@@ -94,7 +94,7 @@ does not compile on the locked SDK. Its persistent failure-log hash is
 | T19 | **PARTIAL — new Fabric HIL** | Offline `NORMAL→QUIET` was captured; after AP restore `_matter._tcp` was not discovered and latest-value read timed out. |
 | Controller restart with same storage | **PASS — new Fabric HIL** | Independent chip-tool processes reused persistent storage and re-established CASE. |
 | Device restart CASE/EP reads | **PARTIAL — new Fabric HIL** | Ordinary restart restored CASE and EP2 read; post-restart EP1/EP2 pair was not both retained. |
-| P1 independent review | **PENDING RE-REVIEW** | Historical conclusion is `REQUEST_CHANGES`; final status awaits independent review of `2f5d583`, the frozen production image, authoritative HIL evidence commit `0dda51d4`, and the final HEAD. |
+| P1 independent review | **PASS** | `gpt-5.6-sol` accepted reviewed HEAD `7ebb6eec`, implementation `2f5d583`, and authoritative production HIL evidence `0dda51d4`; historical `REQUEST_CHANGES` and `87a3f415` are superseded. |
 
 ## Evidence retention and safety
 
@@ -110,7 +110,10 @@ does not compile on the locked SDK. Its persistent failure-log hash is
 The controller `ChangeToMode(1) → ChangeToMode(0)` success-path HIL is now
 recorded outside the NIGHT window on the frozen remediation production image
 and bound to authoritative evidence commit `0dda51d4`.
-The branch remains `PENDING_REVIEW` / historical `REQUEST_CHANGES`; it cannot
-enter `READY_TO_MERGE` until an independent Reviewer reviews `2f5d583`, the corrected HIL
-evidence, and the fixed final HEAD, then provides a final conclusion. Human Lead
-must separately accept any remaining PARTIAL items before integration.
+The independent Reviewer conclusion is **PASS**, bound to reviewed HEAD
+`7ebb6eec5f40d9f95a02e2dc1119887c4f0f3aee`, implementation `2f5d583`, and
+authoritative HIL evidence `0dda51d4aeef2a1717445dcb96c462094b8ed1ec`.
+The task is now `REVIEWER_PASS`, but it must not enter `READY_TO_MERGE` until
+Human Lead explicitly accepts the remaining T14, T17, T19, and device-restart
+EP1/EP2 evidence boundaries. Any firmware change or post-review integration
+merge requires a fresh review of the resulting HEAD.
