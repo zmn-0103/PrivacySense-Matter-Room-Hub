@@ -143,15 +143,17 @@ compatible baseline 与 integrated size 对比；动态诊断来自精确 App BI
 
 #### E. 还有哪些没有完成？
 
-T01、T02、T18 没有在本次收口补测；PSRH-042 的 T14/T17/T19 和设备重启端点
-配对仍按 PARTIAL 记录；没有在本任务做物理装配、视觉材料、24 小时稳定性或
-产品认证。这些限制是项目可信度的一部分，应主动说明。
+T01、T02、T18 没有在本次收口补测；T08 错误 Wi-Fi 密码路径未形成 PASS，T11
+配置损坏恢复未执行，T20 24 小时稳定性测试未执行；T13 只有运行窗口
+观察，没有执行 watchdog fault injection。PSRH-042 的 T14/T17/T19 和设备
+重启端点配对仍按 PARTIAL 记录；没有在本任务做物理装配、视觉材料、24 小时
+稳定性或产品认证。这些限制是项目可信度的一部分，应主动说明。
 
 ## 五、常见追问的安全回答
 
 | 追问 | 建议回答 |
 |---|---|
-| “是不是所有测试都通过了？” | 不是。PSRH-043 请求的集成 HIL 门禁有 PASS 记录，但 PSRH-042 保留了多个 PARTIAL，T01/T02/T18 也没有在本次收口补测。 |
+| “是不是所有测试都通过了？” | 不是。PSRH-043 请求的集成 HIL 门禁有 PASS 记录，但 PSRH-042 保留了多个 PARTIAL；T01/T02/T08/T11/T18/T20 没有在本次收口形成 PASS，T13 也没有执行 watchdog fault injection。 |
 | “是不是已经量产？” | 不是。这是开发板和模块组成的可验证原型；没有在本任务完成洞洞板、外壳、装配、量产一致性或认证。 |
 | “为什么说零 warning？” | 不这么说。PSRH-043 消除了一个项目自有 unused-function warning；其余项目 CMake、ESP-Matter/ConnectedHomeIP 和 Kconfig warnings 被保留并分类。 |
 | “Matter 是否兼容所有平台？” | 不能这样宣称。记录的是锁定 ESP-Matter 1.5、特定控制器、精确镜像和已保存 HIL 证据。 |
