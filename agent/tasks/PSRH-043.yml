@@ -1,6 +1,6 @@
 task_id: "PSRH-043"
 title: "Phase 5 reliability diagnostics and resource closure"
-status: "READY_TO_MERGE" # 独立 Reviewer PASS，Human Lead 已明确接受
+status: "DONE" # PSRH-044 文档收口已记录；最终 HIL/资源证据保持不变
 goal: "并行完成阶段 5 的项目告警清理、资源诊断基线和可靠性证据准备，不触碰 PSRH-042 Matter 适配路径或改变冻结的安全策略"
 owner: "Builder Lead: Human Lead"
 builder: "Codex (Builder AI)"
@@ -149,7 +149,7 @@ human_lead_acceptance:
   accepted_boundaries:
     - "All requested HIL gates are PASS; no residual PARTIAL hardware gate is accepted by exception."
     - "The acceptance is bound to reviewed HEAD 4af6c6350e070a3129b63596587d46042cf34148, the exact App BIN, and the three recorded evidence manifests."
-  disposition: "Accepted for READY_TO_MERGE. Any firmware, image, manifest, or substantive evidence change requires fresh independent review and acceptance."
+  disposition: "Historical acceptance was for READY_TO_MERGE; PSRH-044 records the current task status as DONE without changing the exact image or three evidence manifests. Any firmware, image, manifest, or substantive evidence change requires fresh independent review and acceptance."
 
 required_evidence:
   - "builder_handoff"

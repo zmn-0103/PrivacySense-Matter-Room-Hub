@@ -1,0 +1,96 @@
+task_id: "PSRH-044"
+title: "Documentation and career-material closeout"
+status: "READY_TO_MERGE" # 独立 Reviewer PASS，Human Lead 已明确接受
+goal: "完成项目文档、测试证据索引和中英文求职材料收口；所有职业陈述均绑定现有提交与证据，不扩大已完成范围"
+builder_lead: "Human Lead"
+owner: "Codex (Builder AI)"
+reviewer: "gpt-5.6-sol"
+baseline_commit: "e1db746171498be76770e5a7b2ab4456017c2ef5"
+
+owned_paths:
+  - "agent/tasks/PSRH-044.yml"
+  - "agent/tasks/PSRH-042.yml"
+  - "agent/tasks/PSRH-043.yml"
+  - "README.md"
+  - "docs/project-plan.md"
+  - "docs/project-closeout.md"
+  - "docs/resume-materials.md"
+  - "tests/README.md"
+
+read_only_paths:
+  - "firmware/**"
+  - "tests/host/**"
+  - "tests/evidence/**"
+  - "hardware/**"
+  - "docs/interfaces/**"
+  - "docs/matter-data-model.md"
+  - "docs/task-architecture.md"
+
+interfaces: []
+approved_sources:
+  - "docs/approved_sources/README.md"
+related_adrs: []
+
+constraints:
+  delivery_type: "Documentation-only"
+  excluded_execution: "No rebuild, flash, HIL, T01, T02, or T18 retest"
+  excluded_hardware: "No perfboard, enclosure, wiring, assembly, architecture diagram, demo video, or photo work"
+  baseline_policy: "Use only existing commits, repository evidence, and recorded external artifact manifests; do not invent missing hashes or results"
+  privacy_policy: "Do not copy credentials, setup payloads, private keys, MAC addresses, complete addresses, raw logs, or controller storage into the repository"
+  status_policy: "Historical READY_TO_MERGE wording in time-of-capture evidence remains historical; current PSRH-042/043 status is DONE"
+
+acceptance:
+  - "PSRH-042.yml and PSRH-043.yml are updated from READY_TO_MERGE to DONE without changing their implementation or evidence scope"
+  - "docs/project-plan.md records the Phase 6 scope adjustment and the Human Lead decision, including explicit exclusions"
+  - "README.md describes the current integrated baseline, validation status, evidence boundaries, and non-claims without stale pre-implementation wording"
+  - "docs/project-closeout.md provides a final scope, outcome, traceability, quantitative evidence, limitation, and non-claim record"
+  - "tests/README.md indexes the committed evidence and distinguishes PASS, PARTIAL, DEFERRED, BLOCKED, historical, and not-rerun results"
+  - "docs/resume-materials.md contains Chinese and English resume descriptions, an interview outline, and a quantitatively traceable results list"
+  - "All repository-relative Markdown links in the changed documents resolve; diff formatting is clean; no firmware, test implementation, build output, or HIL artifact is changed"
+  - "The task is handed to an independent Reviewer; this Builder task does not self-certify the Reviewer conclusion"
+
+required_evidence:
+  - "changed-file-scope-check"
+  - "markdown-link-check"
+  - "fact-traceability-matrix"
+  - "independent-review-or-explicit-pending"
+
+builder_verification:
+  changed_file_scope: "PASS — only the eight PSRH-044 delivery paths are changed"
+  markdown_relative_links: "PASS — all repository-relative links in README.md, docs/project-plan.md, docs/project-closeout.md, docs/resume-materials.md, and tests/README.md resolve"
+  diff_check: "PASS — git diff --check"
+  fact_cross_check: "PASS — resume/closeout numbers and statuses cross-checked against committed PSRH-042/043 evidence"
+  execution_boundary: "PASS — no rebuild, flash, HIL, Host test, T01/T02/T18 retest, or hardware operation performed for PSRH-044"
+
+forbidden:
+  - "Modify firmware or test implementation code"
+  - "Rebuild, flash, run HIL, or rerun T01, T02, or T18"
+  - "Perform perfboard, enclosure, wiring, assembly, architecture-diagram, video, or photo work"
+  - "Present an unperformed test, enclosure, product-grade capability, 24-hour stability, production readiness, medical capability, security capability, or safety certification as completed"
+  - "Upgrade PSRH-042 PARTIAL evidence to PASS or merge separate evidence sets without preserving their scope"
+  - "Commit credentials, setup payloads, private keys, MAC addresses, complete addresses, raw logs, or controller storage"
+
+independent_review:
+  conclusion: "PASS"
+  reviewer: "gpt-5.6-sol"
+  reviewed_commit: "ff7e60c2a691755f7bae6bb7b6919ed7653b8ee5"
+  reviewed_at: "2026-08-09"
+  scope: "Changed documentation, task-status transitions, repository-relative links, quantitative traceability, historical evidence boundaries, and exclusion compliance"
+  findings:
+    - "Initial review of aee610d requested restoration of the T01-T20 executable test definitions."
+    - "Initial review requested explicit top-level disclosure of the T08, T11, T13, and T20 boundaries."
+    - "Follow-up ff7e60c restored all 20 definitions and added consistent README, closeout, resume, and test-index disclosures."
+  verification: "YAML, repository-relative links, diff whitespace, changed-path scope, quantitative traceability, sensitive-content scan, and clean worktree PASS; no firmware, test implementation, build, flash, HIL, or hardware action was required."
+  disposition: "No blocking findings remain. Independent review PASS is bound to ff7e60c and the existing PSRH-042/043 evidence boundaries."
+
+human_lead_acceptance:
+  accepted: true
+  accepted_by: "Human Lead (explicit user acceptance)"
+  accepted_at: "2026-08-09"
+  disposition: "Accepted for READY_TO_MERGE as a documentation-only closeout. Any implementation, evidence, quantitative-claim, or scope change requires fresh review."
+
+approval:
+  required: true
+  approved_by: "Human Lead (explicit PSRH-044 scope request)"
+  approved_at: "2026-08-09"
+  notes: "Approved as documentation-only closeout from e1db746. Update PSRH-042 and PSRH-043 to DONE; revise Phase 6 to documentation/career-material closeout; update README and tests index; create final closeout and Chinese/English resume/interview materials. Explicitly exclude firmware/test changes, rebuild/flash/HIL, T01/T02/T18 retest, physical assembly, and visual presentation materials. Final claims must be traceable to existing commits and evidence, and must preserve known limitations and non-claims."
