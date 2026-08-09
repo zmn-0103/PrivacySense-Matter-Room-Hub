@@ -1,6 +1,6 @@
 task_id: "PSRH-042"
 title: "Matter API compatibility on ESP-Matter release/v1.5"
-status: "READY_TO_MERGE" # 独立 Reviewer PASS，Human Lead 已接受剩余证据边界
+status: "DONE" # PSRH-044 文档收口已记录；原有证据边界保持不变
 goal: "在锁定的 ESP-Matter release/v1.5 上完成 Matter API 兼容、保持 EP0/EP1/EP2 数据模型不变，并产生构建/size/测试证据"
 builder_lead: "gpt-5.6-terra"
 owner: "gpt-5.6-luna"
@@ -140,7 +140,7 @@ human_lead_acceptance:
     - "T17 remains PARTIAL at the retained-evidence boundary: automatic exit and post-exit CurrentMode are captured, but automatic entry is not separately captured."
     - "T19 remains PARTIAL at the retained-evidence boundary: offline local transition is captured, but post-recovery latest-value read was not verified."
     - "Device restart EP1/EP2 evidence remains PARTIAL because the post-restart pair was not both retained."
-  disposition: "Accepted for READY_TO_MERGE / integration with the stated evidence boundaries; later firmware changes or integration conflicts require fresh review."
+  disposition: "Historical acceptance was for READY_TO_MERGE / integration with the stated evidence boundaries; PSRH-044 records the current task status as DONE without changing those boundaries. Later firmware changes or integration conflicts require fresh review."
 
 required_evidence:
   - "builder_handoff"
